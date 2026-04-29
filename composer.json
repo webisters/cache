@@ -1,0 +1,67 @@
+{
+    "name": "webisters/cache",
+    "description": "Webisters Cache Library",
+    "license": "MIT",
+    "type": "library",
+    "keywords": [
+        "cache",
+        "files",
+        "memcached",
+        "redis",
+        "igbinary",
+        "json",
+        "json-array",
+        "msgpack"
+    ],
+    "authors": [
+        {
+            "name": "Hafiz Muhammad Moaz",
+            "email": "hafizmoazkhalid@gmail.com",
+            "homepage": "https://github.com/HafizMMoaz"
+        }
+    ],
+    "homepage": "https://webisters.com/packages/cache",
+    "support": {
+        "email": "support@webisters.com",
+        "issues": "https://github.com/webisters/cache/issues",
+        "forum": "https://github.com/webisters/forum",
+        "source": "https://github.com/webisters/cache",
+        "docs": "https://webisters.com"
+    },
+    "funding": [
+        {
+            "type": "Webisters Sponsor",
+            "url": "https://webisters.com/sponsor"
+        }
+    ],
+    "require": {
+        "php": ">=8.2",
+        "ext-json": "*",
+        "webisters/debug": "*",
+        "webisters/log": "*"
+    },
+    "require-dev": {
+        "webisters/coding-standard": "*",
+        "jetbrains/phpstorm-attributes": "^1.0",
+        "phpunit/phpunit": "^10.5"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "autoload": {
+        "psr-4": {
+            "Framework\\Cache\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\Cache\\": "tests/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true
+    }
+}
+
+
