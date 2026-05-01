@@ -16,14 +16,16 @@ composer require webisters/cache
 - PHP: `>=8.2`
 - Composer: Compatible with Composer 2.x.
 
-## Quick Start
-```php
-<?php
-require __DIR__ . '/vendor/autoload.php';
+## Documentation
+- Guide: https://docs.webisters.com/guides/libraries/cache/
+- Package: https://webisters.com/packages/cache
 
-// Initialize the package and integrate it into your application flow.
+## Included in Webisters Framework
+If you're building a full Webisters application, install the framework meta-package:
+
+```bash
+composer require webisters/framework
 ```
-Next step: review the package source and adapt initialization to your use case.
 
 ## Development
 ```bash
