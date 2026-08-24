@@ -48,9 +48,9 @@ class FilesCache extends Cache
         'gc' => 1,
     ];
     /**
-     * @var string|null
+     * @var string
      */
-    protected ?string $baseDirectory;
+    protected string $baseDirectory;
     /**
      * Files removed by the collection currently running.
      *
@@ -549,10 +549,10 @@ class FilesCache extends Cache
             }
             $path = $baseDirectory . $filename;
             if (\is_file($path)) {
-                \str_starts_with($filename, static::TEMPORARY_PREFIX)
+                $removed = \str_starts_with($filename, static::TEMPORARY_PREFIX)
                     ? $this->deleteAbandonedTemporaryFile($path)
-                    : $this->getContents($path);
-                if (!\is_file($path)) {
+                    : $this->deleteExpiredFile($path);
+                if ($removed) {
                     $this->purged++;
                 }
                 continue;
@@ -581,12 +581,34 @@ class FilesCache extends Cache
      *
      * @param string $filepath
      */
-    protected function deleteAbandonedTemporaryFile(string $filepath) : void
+    protected function deleteAbandonedTemporaryFile(string $filepath) : bool
     {
         $time = @\filemtime($filepath);
         if ($time !== false && $time <= \time() - static::TEMPORARY_GRACE) {
-            $this->deleteFile($filepath);
+            return $this->deleteFile($filepath);
         }
+        return false;
+    }
+
+    /**
+     * Delete a file whose item has expired.
+     *
+     * Removing expired files used to be a side effect of reading them through
+     * getContents, which left the collector with nothing to report and no way
+     * to tell a deletion from a file that was simply still valid. This says so.
+     *
+     * @since 4.2
+     *
+     * @param string $filepath
+     *
+     * @return bool TRUE if the file was expired and deleted, otherwise FALSE
+     */
+    protected function deleteExpiredFile(string $filepath) : bool
+    {
+        if (!$this->isExpiredFile($filepath)) {
+            return false;
+        }
+        return $this->deleteFile($filepath);
     }
 
     protected function deleteAll(string $baseDirectory) : bool

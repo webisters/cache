@@ -45,6 +45,7 @@
     },
     "require-dev": {
         "jetbrains/phpstorm-attributes": "^1.0",
+        "phpstan/phpstan": "^2.0",
         "phpunit/phpunit": "^10.5",
         "psr/simple-cache": "^3.0",
         "webisters/coding-standard": "*",
@@ -70,5 +71,23 @@
         "optimize-autoloader": true,
         "preferred-install": "dist",
         "sort-packages": true
+    },
+    "scripts": {
+        "analyse": "phpstan analyse",
+        "lint": "php-cs-fixer fix --dry-run --diff",
+        "lint:fix": "php-cs-fixer fix",
+        "test": "phpunit",
+        "check": [
+            "@lint",
+            "@analyse",
+            "@test"
+        ]
+    },
+    "scripts-descriptions": {
+        "analyse": "Run PHPStan static analysis",
+        "lint": "Check the coding standard without changing anything",
+        "lint:fix": "Apply the coding standard",
+        "test": "Run the PHPUnit suite",
+        "check": "Run the coding standard, the static analysis and the suite"
     }
 }
