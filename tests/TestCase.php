@@ -142,6 +142,43 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         );
     }
 
+    public function testTagsSetAndGet() : void
+    {
+        self::assertNull($this->cache->tags('posts')->get('list'));
+        self::assertTrue($this->cache->tags('posts')->set('list', 'value', 60));
+        self::assertSame('value', $this->cache->tags('posts')->get('list'));
+        self::assertTrue($this->cache->tags('posts')->flush());
+        self::assertNull($this->cache->tags('posts')->get('list'));
+    }
+
+    public function testTagsDoNotCollideWithUntaggedItems() : void
+    {
+        self::assertTrue($this->cache->set('list', 'plain', 60));
+        self::assertTrue($this->cache->tags('posts')->set('list', 'tagged', 60));
+        self::assertSame('plain', $this->cache->get('list'));
+        self::assertSame('tagged', $this->cache->tags('posts')->get('list'));
+        self::assertTrue($this->cache->tags('posts')->flush());
+        self::assertSame('plain', $this->cache->get('list'));
+        self::assertNull($this->cache->tags('posts')->get('list'));
+    }
+
+    public function testFlushTagsInvalidatesOnlyTheGivenTags() : void
+    {
+        self::assertTrue($this->cache->tags('posts')->set('a', 'x', 60));
+        self::assertTrue($this->cache->tags('users')->set('b', 'y', 60));
+        self::assertTrue($this->cache->flushTags('posts'));
+        self::assertNull($this->cache->tags('posts')->get('a'));
+        self::assertSame('y', $this->cache->tags('users')->get('b'));
+    }
+
+    public function testFlushOneTagInvalidatesItemsSharingIt() : void
+    {
+        self::assertTrue($this->cache->tags(['posts', 'users'])->set('feed', 'z', 60));
+        self::assertSame('z', $this->cache->tags(['users', 'posts'])->get('feed'));
+        self::assertTrue($this->cache->tags('users')->flush());
+        self::assertNull($this->cache->tags(['posts', 'users'])->get('feed'));
+    }
+
     public function testIncrement() : void
     {
         self::assertSame(1, $this->cache->increment('i'));

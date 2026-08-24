@@ -294,6 +294,56 @@ abstract class Cache
     abstract public function flush() : bool;
 
     /**
+     * Get a cache view bound to a set of tags.
+     *
+     * Items written through the returned instance are grouped under the given
+     * tags and can be invalidated together with its flush method:
+     *
+     * ```php
+     * $cache->tags('posts')->set('list', $posts);
+     * $cache->tags('posts')->get('list');
+     * $cache->tags('posts')->flush(); // drops every item tagged 'posts'
+     * ```
+     *
+     * Tagged items live in their own key namespace, so they never collide
+     * with items set through the untagged methods.
+     *
+     * @since 4.2
+     *
+     * @param array<int,string>|string $tags One tag name or a list of them
+     *
+     * @throws InvalidArgumentException if $tags is empty or holds an empty tag
+     *
+     * @return TaggedCache
+     */
+    public function tags(array | string $tags) : TaggedCache
+    {
+        return new TaggedCache($this, (array) $tags);
+    }
+
+    /**
+     * Invalidates every item stored under any of the given tags.
+     *
+     * @since 4.2
+     *
+     * @param array<int,string>|string $tags One tag name or a list of them
+     *
+     * @throws InvalidArgumentException if $tags is empty or holds an empty tag
+     *
+     * @return bool TRUE if all tags were invalidated, otherwise FALSE
+     */
+    public function flushTags(array | string $tags) : bool
+    {
+        $status = true;
+        foreach ((array) $tags as $tag) {
+            if (!$this->tags([$tag])->flush()) {
+                $status = false;
+            }
+        }
+        return $status;
+    }
+
+    /**
      * Increments the value of one item.
      *
      * @param string $key The item name
