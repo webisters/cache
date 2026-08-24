@@ -23,6 +23,12 @@ use SensitiveParameter;
  */
 class MemcachedCache extends Cache
 {
+    /**
+     * Longest key Memcached will hold, in bytes.
+     *
+     * @since 4.2
+     */
+    protected const MAX_KEY_LENGTH = 250;
     protected Memcached $memcached;
     /**
      * Memcached Cache handler configurations.
@@ -87,6 +93,27 @@ class MemcachedCache extends Cache
     #[Override]
     protected function assertSerializerAvailable(Serializer $serializer) : void
     {
+    }
+
+    /**
+     * Memcached refuses a space or a control character in a key as well as an
+     * over-long one, so both send the key to a digest.
+     *
+     * The space matters in practice: a key built from a name, a title or
+     * anything a person typed will have one, and it works on every other
+     * driver, so failing here would be the abstraction leaking.
+     *
+     * @since 4.2
+     *
+     * @param string $key The key, prefix included
+     *
+     * @return bool
+     */
+    #[Override]
+    protected function isStorableKey(string $key) : bool
+    {
+        return parent::isStorableKey($key)
+            && !\preg_match('/[\x00-\x20\x7F]/', $key);
     }
 
     protected function validateConfigs() : void

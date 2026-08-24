@@ -53,11 +53,11 @@ use SensitiveParameter;
 class DatabaseCache extends Cache
 {
     /**
-     * How long a key may be before it no longer fits the key column.
+     * The width of the key column.
      *
-     * Counted in bytes rather than characters, which is the conservative
-     * reading: the column is measured in characters, but the index behind it
-     * is measured in bytes.
+     * The database is happy to accept a longer key, truncate it and report
+     * success, after which the item can never be read back and two keys
+     * sharing a long enough head become one row.
      *
      * @since 4.2
      */
@@ -164,37 +164,6 @@ class DatabaseCache extends Cache
     protected function getColumn(string $key) : string
     {
         return $this->configs['columns'][$key];
-    }
-
-    /**
-     * Make the storage key of an item, standing in a digest when it is too
-     * long for the key column.
-     *
-     * The column cannot hold every key an application might use, and the
-     * database is happy to accept a longer one, truncate it and report
-     * success, after which the item can never be read back and two keys
-     * sharing a long enough head become the same row. Hashing instead keeps
-     * every key distinct and readable, at the cost of the stored name no
-     * longer resembling the original.
-     *
-     * The digest is deterministic, so reads, writes and deletions all agree,
-     * and it carries the reserved prefix so it is recognisable as this
-     * library's doing when looking at the table.
-     *
-     * @since 4.2
-     *
-     * @param string $key The item name
-     *
-     * @return string
-     */
-    #[Override]
-    protected function renderKey(string $key) : string
-    {
-        $key = parent::renderKey($key);
-        if (\strlen($key) <= static::MAX_KEY_LENGTH) {
-            return $key;
-        }
-        return static::RESERVED_PREFIX . 'sha256:' . \hash('sha256', $key);
     }
 
     /**
