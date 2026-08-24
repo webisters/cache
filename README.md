@@ -1,11 +1,36 @@
 # Webisters Cache
 
-Webisters Cache Library This library is designed for reuse in Composer-based PHP applications.
+A caching library with one API over seven storage backends, so the driver is a configuration
+choice rather than something the calling code has to know about.
+
+## Drivers
+
+| Driver | Class | Backed by | Survives the request | Shared between servers |
+| --- | --- | --- | --- | --- |
+| APCu | `ApcuCache` | Shared memory on the machine | Yes | No |
+| Redis | `RedisCache` | A Redis server | Yes | Yes |
+| Memcached | `MemcachedCache` | A Memcached pool | Yes | Yes |
+| Files | `FilesCache` | A directory on disk | Yes | Only on shared storage |
+| Database | `DatabaseCache` | A MariaDB or MySQL table | Yes | Yes |
+| Array | `ArrayCache` | A PHP array | No | No |
+| Null | `NullCache` | Nothing, every read misses | No | No |
+
+`ArrayCache` suits tests and request-scoped memoization. `NullCache` turns caching off without
+the calling code having to change.
 
 ## What It Provides
-- Caching utilities to improve performance and reduce repeated work.
-- Reusable PHP components intended for integration into larger applications.
-- Clean interfaces and extension points to support maintainable implementations.
+
+- **The basics on every driver**: `get`, `set`, `delete`, their multi-key forms, `flush`,
+  `increment` and `decrement`, with a Time To Live on each item.
+- **Compute on miss**: `remember()` and `getOrSet()` build a value only when it is not cached.
+- **Stampede protection**: `rememberProtected()` recomputes an expiring item once instead of
+  once per concurrent request, using early recompute and a lock.
+- **Tag-based invalidation**: group items under tags and drop them together, on any driver,
+  including the ones with no native tag support.
+- **Atomic primitives**: `add()` writes only when a key is absent, and `lock()`/`unlock()` build
+  mutual exclusion on top of it.
+- **Pluggable serialization**: PHP `serialize`, igbinary, JSON, JSON as arrays, or msgpack.
+- **Debug collector** integration for the Webisters debug toolbar.
 
 ## Installation
 ```bash
