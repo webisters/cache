@@ -59,10 +59,12 @@ final class MemcachedCacheMultiServerTest extends MemcachedCacheTest
             $this->serializer,
             $this->getLogger()
         );
+        $log = $this->getLogger()->getLastLog();
+        self::assertNotNull($log);
         self::assertSame(
             'Cache (memcached): Server pool already has '
             . \getenv('MEMCACHED_HOST') . ':11211',
-            $this->getLogger()->getLastLog()->message
+            $log->message
         );
     }
 

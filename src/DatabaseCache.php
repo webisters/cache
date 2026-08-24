@@ -49,7 +49,7 @@ use SensitiveParameter;
  */
 class DatabaseCache extends Cache
 {
-    protected ?Database $database;
+    protected Database $database;
     /**
      * Database Cache handler configurations.
      *

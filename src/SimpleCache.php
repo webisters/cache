@@ -130,7 +130,7 @@ class SimpleCache implements CacheInterface
     }
 
     /**
-     * @param iterable<string,mixed> $values
+     * @param iterable<int|string,mixed> $values
      * @param DateInterval|int|null $ttl
      *
      * @return bool

@@ -16,6 +16,7 @@ use Framework\Cache\DatabaseCache;
 use Framework\Cache\Debug\CacheCollector;
 use Framework\Cache\FilesCache;
 use Framework\Cache\MemcachedCache;
+use Framework\Cache\NullCache;
 use Framework\Cache\RedisCache;
 use Framework\Cache\Serializer;
 use Framework\Log\Logger;
@@ -23,7 +24,7 @@ use Framework\Log\Loggers\MultiFileLogger;
 
 abstract class TestCase extends \PHPUnit\Framework\TestCase
 {
-    protected ?Cache $cache;
+    protected Cache $cache;
     /**
      * @var array<string,mixed>
      */
@@ -34,7 +35,11 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
     public function tearDown() : void
     {
         $this->cache->flush();
-        $this->cache = null;
+        // Drop the last reference to the driver so its destructor runs now,
+        // closing connections rather than leaving them to pile up across the
+        // suite. A stand-in rather than unset, which PHP 8.4 property hooks
+        // make unsafe on a property a subclass could redeclare.
+        $this->cache = new NullCache();
     }
 
     protected function getLogger() : Logger

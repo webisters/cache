@@ -14,6 +14,7 @@ use Framework\Log\Logger;
 use Framework\Log\LogLevel;
 use InvalidArgumentException;
 use JetBrains\PhpStorm\Pure;
+use RuntimeException;
 use SensitiveParameter;
 
 /**
@@ -899,7 +900,7 @@ abstract class Cache
     protected function serialize(mixed $value) : string
     {
         if ($this->serializer === Serializer::IGBINARY) {
-            return \igbinary_serialize($value);
+            return $this->assertSerialized(\igbinary_serialize($value));
         }
         if ($this->serializer === Serializer::JSON
             || $this->serializer === Serializer::JSON_ARRAY
@@ -907,9 +908,34 @@ abstract class Cache
             return \json_encode($value, \JSON_THROW_ON_ERROR);
         }
         if ($this->serializer === Serializer::MSGPACK) {
-            return \msgpack_serialize($value);
+            return $this->assertSerialized(\msgpack_serialize($value));
         }
         return \serialize($value);
+    }
+
+    /**
+     * Make sure a serializer produced something storable.
+     *
+     * igbinary and msgpack report a failure by handing back null instead of
+     * throwing, which without this would only surface later as a return type
+     * error from serialize, naming neither the value nor the serializer.
+     *
+     * @since 4.2
+     *
+     * @param string|null $serialized
+     *
+     * @throws RuntimeException if the value could not be serialized
+     *
+     * @return string
+     */
+    protected function assertSerialized(?string $serialized) : string
+    {
+        if ($serialized === null) {
+            throw new RuntimeException(
+                'Value could not be serialized with ' . $this->serializer->value
+            );
+        }
+        return $serialized;
     }
 
     /**
