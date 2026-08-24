@@ -24,6 +24,26 @@ use Framework\Log\Loggers\MultiFileLogger;
 
 abstract class TestCase extends \PHPUnit\Framework\TestCase
 {
+    /**
+     * TTL for an item a test needs to still be there when it reads it back.
+     *
+     * Long enough that crossing a second boundary between the write and the
+     * read cannot expire it. A one second TTL here used to fail the suite at
+     * random on a slow runner.
+     */
+    protected const LIVE_TTL = 60;
+    /**
+     * TTL for an item a test means to watch expire.
+     *
+     * Paired with EXPIRY_WAIT, which outlasts it by a whole second, so both
+     * halves have a margin: the item is still there right after the write, and
+     * certainly gone after the wait.
+     */
+    protected const SHORT_TTL = 2;
+    /**
+     * How long to wait for an item written with SHORT_TTL to expire.
+     */
+    protected const EXPIRY_WAIT = 3;
     protected Cache $cache;
     /**
      * @var array<string,mixed>
@@ -62,9 +82,9 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
     public function testSetAndGet() : void
     {
         self::assertNull($this->cache->get('foo'));
-        self::assertTrue($this->cache->set('foo', 'bar', 1));
+        self::assertTrue($this->cache->set('foo', 'bar', static::SHORT_TTL));
         self::assertSame('bar', $this->cache->get('foo'));
-        \sleep(2);
+        \sleep(static::EXPIRY_WAIT);
         self::assertNull($this->cache->get('foo'));
     }
 
@@ -86,13 +106,13 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         );
         self::assertSame(
             ['foo' => true, 'bar' => true],
-            $this->cache->setMulti(['foo' => 'x', 'bar' => 'y'], 1)
+            $this->cache->setMulti(['foo' => 'x', 'bar' => 'y'], static::SHORT_TTL)
         );
         self::assertSame(
             ['bar' => 'y', 'foo' => 'x', 'baz' => null],
             $this->cache->getMulti(['bar', 'foo', 'baz'])
         );
-        \sleep(2);
+        \sleep(static::EXPIRY_WAIT);
         self::assertSame(
             ['foo' => null, 'bar' => null],
             $this->cache->getMulti(['foo', 'bar'])
@@ -102,7 +122,7 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
     public function testDelete() : void
     {
         self::assertNull($this->cache->get('foo'));
-        self::assertTrue($this->cache->set('foo', 'bar', 1));
+        self::assertTrue($this->cache->set('foo', 'bar', static::LIVE_TTL));
         self::assertSame('bar', $this->cache->get('foo'));
         self::assertTrue($this->cache->delete('foo'));
         self::assertNull($this->cache->get('foo'));
@@ -116,7 +136,7 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         );
         self::assertSame(
             ['foo' => true, 'bar' => true],
-            $this->cache->setMulti(['foo' => 'x', 'bar' => 'y'], 1)
+            $this->cache->setMulti(['foo' => 'x', 'bar' => 'y'], static::LIVE_TTL)
         );
         self::assertSame(
             ['bar' => 'y', 'foo' => 'x'],
@@ -136,7 +156,7 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
     {
         self::assertSame(
             ['foo' => true, 'bar' => true],
-            $this->cache->setMulti(['foo' => 'x', 'bar' => 'y'], 1)
+            $this->cache->setMulti(['foo' => 'x', 'bar' => 'y'], static::LIVE_TTL)
         );
         self::assertSame(
             ['bar' => 'y', 'foo' => 'x'],
@@ -206,10 +226,10 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
 
     public function testAddAfterExpiration() : void
     {
-        self::assertTrue($this->cache->add('foo', 'first', 1));
-        self::assertFalse($this->cache->add('foo', 'second', 1));
-        \sleep(2);
-        self::assertTrue($this->cache->add('foo', 'third', 60));
+        self::assertTrue($this->cache->add('foo', 'first', static::SHORT_TTL));
+        self::assertFalse($this->cache->add('foo', 'second', static::SHORT_TTL));
+        \sleep(static::EXPIRY_WAIT);
+        self::assertTrue($this->cache->add('foo', 'third', static::LIVE_TTL));
         self::assertSame('third', $this->cache->get('foo'));
     }
 
@@ -375,8 +395,8 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         self::assertSame(1, $this->cache->increment('i'));
         self::assertSame(2, $this->cache->increment('i'));
         self::assertSame(5, $this->cache->increment('i', 3));
-        self::assertSame(6, $this->cache->increment('i', 1, 2));
-        \sleep(3);
+        self::assertSame(6, $this->cache->increment('i', 1, static::SHORT_TTL));
+        \sleep(static::EXPIRY_WAIT);
         self::assertSame(1, $this->cache->increment('i'));
         self::assertSame(11, $this->cache->increment('i', 10));
     }
@@ -386,8 +406,8 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         self::assertSame(-1, $this->cache->decrement('i'));
         self::assertSame(-2, $this->cache->decrement('i'));
         self::assertSame(-5, $this->cache->decrement('i', 3));
-        self::assertSame(-6, $this->cache->decrement('i', 1, 2));
-        \sleep(3);
+        self::assertSame(-6, $this->cache->decrement('i', 1, static::SHORT_TTL));
+        \sleep(static::EXPIRY_WAIT);
         self::assertSame(-1, $this->cache->decrement('i'));
         self::assertSame(-11, $this->cache->decrement('i', 10));
     }
@@ -454,7 +474,7 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         $contents = $collector->getContents();
         self::assertStringContainsString('Ran 1 command', $contents);
         self::assertStringContainsString('GET', $contents);
-        $this->cache->set('xxx', 'foo', 1);
+        $this->cache->set('xxx', 'foo', static::LIVE_TTL);
         $contents = $collector->getContents();
         self::assertStringContainsString('Ran 2 commands', $contents);
         self::assertStringContainsString('SET', $contents);
