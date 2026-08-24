@@ -43,6 +43,16 @@ abstract class Cache
      */
     public const RESERVED_PREFIX = '@w:';
     /**
+     * Longest key the storage will hold, in bytes, or zero for no limit.
+     *
+     * Counted in bytes rather than characters, since that is what the storages
+     * measure. A driver whose backend refuses longer keys, or truncates them,
+     * sets this and renderKey stands in a digest past it.
+     *
+     * @since 4.2
+     */
+    protected const MAX_KEY_LENGTH = 0;
+    /**
      * Driver specific configurations.
      *
      * @var array<string,mixed>
@@ -995,10 +1005,59 @@ abstract class Cache
         return true;
     }
 
-    #[Pure]
+    /**
+     * Make the storage key of an item, standing in a digest when the storage
+     * cannot hold the key itself.
+     *
+     * A driver says what it can hold through MAX_KEY_LENGTH and, where there
+     * is more to it than length, isStorableKey. Everything else keeps the key
+     * as it is, so a stored name still reads like the one that was asked for.
+     *
+     * @param string $key The item name
+     *
+     * @return string
+     */
     protected function renderKey(string $key) : string
     {
-        return $this->prefix . $key;
+        $key = $this->prefix . $key;
+        return $this->isStorableKey($key) ? $key : $this->digestKey($key);
+    }
+
+    /**
+     * Tell whether the storage can hold a key as it stands.
+     *
+     * Length is the usual limit, so it is handled here. A driver with more to
+     * say about what a key may look like overrides this.
+     *
+     * @since 4.2
+     *
+     * @param string $key The key, prefix included
+     *
+     * @return bool
+     */
+    protected function isStorableKey(string $key) : bool
+    {
+        return static::MAX_KEY_LENGTH < 1
+            || \strlen($key) <= static::MAX_KEY_LENGTH;
+    }
+
+    /**
+     * Stand in a digest for a key the storage cannot hold.
+     *
+     * Deterministic, so reads, writes and deletions all agree on it, and
+     * carrying the reserved prefix so it is recognisable as this library's
+     * doing when looking at the storage. The alternative, letting the storage
+     * refuse or truncate the key, costs the item.
+     *
+     * @since 4.2
+     *
+     * @param string $key The key, prefix included
+     *
+     * @return string
+     */
+    protected function digestKey(string $key) : string
+    {
+        return static::RESERVED_PREFIX . 'sha256:' . \hash('sha256', $key);
     }
 
     /**

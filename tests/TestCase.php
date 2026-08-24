@@ -236,6 +236,62 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         self::assertTrue($this->cache->lock('report'));
     }
 
+    public function testAwkwardKeysRoundTrip() : void
+    {
+        // A key is whatever the application chose. Every driver has to take
+        // the same ones, or the point of one API over several backends is
+        // lost. Memcached refused the long one and the spaced one outright,
+        // and the database truncated the long one and then never found it.
+        $keys = [
+            'long' => \str_repeat('k', 300),
+            'very long' => \str_repeat('k', 5000),
+            'spaced' => 'user profile name',
+            'email' => 'someone@example.com',
+            'url' => 'https://example.com/a/b?c=d&e=f',
+            'unicode' => 'ключ-ключ-ключ',
+        ];
+        foreach ($keys as $name => $key) {
+            self::assertTrue(
+                $this->cache->set($key, 'value-' . $name, static::LIVE_TTL),
+                $name . ' key must be storable'
+            );
+            self::assertSame('value-' . $name, $this->cache->get($key), $name);
+            self::assertTrue($this->cache->delete($key), $name);
+            self::assertNull($this->cache->get($key), $name);
+        }
+    }
+
+    public function testAwkwardKeysStayDistinct() : void
+    {
+        // Truncating to fit made these the same item, so one could be served
+        // the other's value, which is worse than not storing them at all.
+        $first = \str_repeat('x', 400) . 'A';
+        $second = \str_repeat('x', 400) . 'B';
+        self::assertTrue($this->cache->set($first, 'first', static::LIVE_TTL));
+        self::assertTrue($this->cache->set($second, 'second', static::LIVE_TTL));
+        self::assertSame('first', $this->cache->get($first));
+        self::assertSame('second', $this->cache->get($second));
+        self::assertSame(
+            [$first => 'first', $second => 'second'],
+            $this->cache->getMulti([$first, $second])
+        );
+    }
+
+    public function testTheWholeApiTakesAnAwkwardKey() : void
+    {
+        $key = \str_repeat('z', 400) . ' with a space';
+        self::assertTrue($this->cache->add($key, 'one', static::LIVE_TTL));
+        self::assertFalse($this->cache->add($key, 'two', static::LIVE_TTL));
+        self::assertSame('one', $this->cache->get($key));
+        self::assertSame(1, $this->cache->increment($key . 'c', 1, static::LIVE_TTL));
+        self::assertSame(2, $this->cache->increment($key . 'c', 1, static::LIVE_TTL));
+        self::assertTrue($this->cache->lock($key));
+        self::assertFalse($this->cache->lock($key));
+        self::assertTrue($this->cache->unlock($key));
+        self::assertTrue($this->cache->tags('posts')->set($key, 'tagged', static::LIVE_TTL));
+        self::assertSame('tagged', $this->cache->tags('posts')->get($key));
+    }
+
     public function testOrdinaryKeysCannotReachTheBookkeeping() : void
     {
         // These names used to be exactly what the library called its own
