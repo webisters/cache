@@ -66,6 +66,12 @@ class ArrayCache extends Cache
 
     public function set(string $key, mixed $value, ?int $ttl = null) : bool
     {
+        if ($this->isExpiredTtl($ttl)) {
+            // Already expired, so there is nothing worth storing, and any
+            // item under that name is now stale.
+            $this->delete($key);
+            return true;
+        }
         if (isset($this->debugCollector)) {
             $start = \microtime(true);
             return $this->addDebugSet(
@@ -91,6 +97,11 @@ class ArrayCache extends Cache
     #[Override]
     public function add(string $key, mixed $value, ?int $ttl = null) : bool
     {
+        if ($this->isExpiredTtl($ttl)) {
+            // Already expired, so nothing is added. An item already under
+            // that name is left alone, as add never overwrites.
+            return false;
+        }
         if (isset($this->debugCollector)) {
             $start = \microtime(true);
             return $this->addDebugSet(

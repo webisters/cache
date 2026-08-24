@@ -231,6 +231,31 @@ abstract class Cache
     }
 
     /**
+     * Tell whether a Time To Live has already run out.
+     *
+     * A TTL of zero or less describes an item that is expired the moment it is
+     * written, so there is nothing to store. Drivers check this before writing
+     * because the storages disagree about what a zero means on their own: APCu
+     * and Memcached read it as never expire, Redis refuses it outright, and the
+     * files, array and database drivers write an item that is already stale.
+     * Deciding it here keeps one meaning across all of them.
+     *
+     * Null is not a value here, it means no TTL was given, so the instance
+     * default applies.
+     *
+     * @since 4.2
+     *
+     * @param int|null $seconds The TTL as given to a write
+     *
+     * @return bool TRUE when nothing should be stored, otherwise FALSE
+     */
+    #[Pure]
+    protected function isExpiredTtl(?int $seconds) : bool
+    {
+        return $seconds !== null && $seconds <= 0;
+    }
+
+    /**
      * Gets one item from the cache storage.
      *
      * @param string $key The item name

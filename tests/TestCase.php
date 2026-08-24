@@ -144,6 +144,51 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         );
     }
 
+    public function testNullTtlUsesTheInstanceDefault() : void
+    {
+        $this->cache->setDefaultTtl(30);
+        self::assertSame(30, $this->cache->getDefaultTtl());
+        self::assertTrue($this->cache->set('foo', 'bar'));
+        self::assertSame('bar', $this->cache->get('foo'));
+    }
+
+    public function testZeroTtlStoresNothing() : void
+    {
+        self::assertTrue($this->cache->set('foo', 'bar', 0));
+        self::assertNull($this->cache->get('foo'));
+    }
+
+    public function testNegativeTtlStoresNothing() : void
+    {
+        self::assertTrue($this->cache->set('foo', 'bar', -5));
+        self::assertNull($this->cache->get('foo'));
+    }
+
+    public function testExpiredTtlDropsWhatWasThere() : void
+    {
+        self::assertTrue($this->cache->set('foo', 'bar', 60));
+        self::assertSame('bar', $this->cache->get('foo'));
+        // The new item is already expired, so the old one must not survive.
+        self::assertTrue($this->cache->set('foo', 'baz', 0));
+        self::assertNull($this->cache->get('foo'));
+    }
+
+    public function testExpiredTtlAddsNothing() : void
+    {
+        self::assertFalse($this->cache->add('foo', 'bar', 0));
+        self::assertNull($this->cache->get('foo'));
+        self::assertFalse($this->cache->add('foo', 'bar', -5));
+        self::assertNull($this->cache->get('foo'));
+    }
+
+    public function testExpiredTtlAddLeavesAnExistingItemAlone() : void
+    {
+        self::assertTrue($this->cache->set('foo', 'kept', 60));
+        // add never overwrites, so an expired TTL must not be a way to delete.
+        self::assertFalse($this->cache->add('foo', 'bar', 0));
+        self::assertSame('kept', $this->cache->get('foo'));
+    }
+
     public function testAdd() : void
     {
         self::assertTrue($this->cache->add('foo', 'first', 60));
