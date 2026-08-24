@@ -10,6 +10,7 @@
 namespace Framework\Cache\Debug;
 
 use Framework\Cache\ApcuCache;
+use Framework\Cache\DatabaseCache;
 use Framework\Cache\FilesCache;
 use Framework\Cache\MemcachedCache;
 use Framework\Cache\RedisCache;
@@ -150,6 +151,7 @@ class CacheCollector extends Collector
     {
         foreach ([
             'apcu' => ApcuCache::class,
+            'database' => DatabaseCache::class,
             'files' => FilesCache::class,
             'memcached' => MemcachedCache::class,
             'redis' => RedisCache::class,

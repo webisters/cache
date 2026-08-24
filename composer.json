@@ -5,6 +5,7 @@
     "type": "library",
     "keywords": [
         "cache",
+        "database",
         "files",
         "memcached",
         "redis",
@@ -42,8 +43,12 @@
     },
     "require-dev": {
         "webisters/coding-standard": "*",
+        "webisters/database": "*",
         "jetbrains/phpstorm-attributes": "^1.0",
         "phpunit/phpunit": "^10.5"
+    },
+    "suggest": {
+        "webisters/database": "Required by the DatabaseCache driver, for a cache that survives restarts"
     },
     "minimum-stability": "dev",
     "prefer-stable": true,
@@ -57,11 +62,9 @@
             "Tests\\Cache\\": "tests/"
         }
     },
-    "config": {
+    "config": {
         "optimize-autoloader": true,
         "preferred-install": "dist",
         "sort-packages": true
     }
 }
-
-
