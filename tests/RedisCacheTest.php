@@ -9,6 +9,7 @@
  */
 namespace Tests\Cache;
 
+use Framework\Cache\ConnectionException;
 use Framework\Cache\RedisCache;
 
 class RedisCacheTest extends TestCase
@@ -57,7 +58,51 @@ class RedisCacheTest extends TestCase
             'host' => \getenv('REDIS_HOST'),
             'password' => 'foo',
         ];
-        $this->expectException(\RedisException::class);
+        $this->expectException(ConnectionException::class);
+        $this->expectExceptionMessageMatches(
+            '/^Cache \(redis\): Authentication failed on .+:6379/'
+        );
+        $this->setCache();
+    }
+
+    public function testAuthFailureKeepsTheDriverException() : void
+    {
+        $this->configs = [
+            'host' => \getenv('REDIS_HOST'),
+            'password' => 'foo',
+        ];
+        try {
+            $this->setCache();
+            self::fail('The connection was expected to be refused');
+        } catch (ConnectionException $exception) {
+            // The driver message is what says why, so it must not be lost.
+            self::assertInstanceOf(\RedisException::class, $exception->getPrevious());
+        }
+    }
+
+    public function testConnectionFailureNamesTheServer() : void
+    {
+        $this->configs = [
+            'host' => \getenv('REDIS_HOST'),
+            'port' => 12345,
+        ];
+        $this->expectException(ConnectionException::class);
+        $this->expectExceptionMessageMatches(
+            '/^Cache \(redis\): Connection failed on .+:12345/'
+        );
+        $this->setCache();
+    }
+
+    public function testUnknownHostIsReported() : void
+    {
+        $this->configs = [
+            'host' => 'no-such-redis-host.invalid',
+            'timeout' => 1.0,
+        ];
+        $this->expectException(ConnectionException::class);
+        $this->expectExceptionMessageMatches(
+            '/^Cache \(redis\): Connection failed on no-such-redis-host\.invalid:6379/'
+        );
         $this->setCache();
     }
 

@@ -9,10 +9,49 @@
  */
 namespace Tests\Cache;
 
+use Framework\Cache\ConnectionException;
 use Framework\Cache\MemcachedCache;
 
 class MemcachedCacheTest extends TestCase
 {
+    public function testUnreachablePoolNamesTheServers() : void
+    {
+        $this->expectException(ConnectionException::class);
+        $this->expectExceptionMessageMatches(
+            '/^Cache \(memcached\): Could not connect to any server in the pool: .+:12345/'
+        );
+        new MemcachedCache(
+            [
+                'servers' => [
+                    [
+                        'host' => \getenv('MEMCACHED_HOST'),
+                        'port' => 12345,
+                    ],
+                ],
+            ],
+            $this->prefix,
+            $this->serializer,
+            $this->getLogger()
+        );
+    }
+
+    public function testEmptyPoolIsReported() : void
+    {
+        $this->expectException(ConnectionException::class);
+        $this->expectExceptionMessage(
+            'Cache (memcached): No server was added to the pool'
+        );
+        // Passing an empty servers config would not empty the pool, since
+        // array_replace_recursive leaves the default server in place, so the
+        // configs are replaced outright.
+        new class() extends MemcachedCache {
+            protected array $configs = [
+                'servers' => [],
+                'options' => [],
+            ];
+        };
+    }
+
     public function setUp() : void
     {
         $this->configs = [

@@ -12,6 +12,7 @@ namespace Framework\Cache;
 use Framework\Log\Logger;
 use Override;
 use Redis;
+use RedisException;
 use SensitiveParameter;
 
 /**
@@ -66,16 +67,56 @@ class RedisCache extends Cache
     protected function connect() : void
     {
         $this->redis = new Redis();
-        $this->redis->connect(
+        $this->connectionStep('Connection', fn () => $this->redis->connect(
             $this->configs['host'],
             $this->configs['port'],
             $this->configs['timeout']
-        );
+        ));
         if (isset($this->configs['password'])) {
-            $this->redis->auth($this->configs['password']);
+            $this->connectionStep(
+                'Authentication',
+                fn () => $this->redis->auth($this->configs['password'])
+            );
         }
         if (isset($this->configs['database'])) {
-            $this->redis->select($this->configs['database']);
+            $this->connectionStep(
+                'Selection of database ' . $this->configs['database'],
+                fn () => $this->redis->select($this->configs['database'])
+            );
+        }
+    }
+
+    /**
+     * Run one step of the connection, turning a failure into a message that
+     * says which step failed and on which server.
+     *
+     * phpredis reports a problem either by throwing or by returning false,
+     * depending on the build and the error, so both are handled. A thrown
+     * RedisException is kept as the previous exception.
+     *
+     * @since 4.2
+     *
+     * @param string $step What is being attempted, for the message
+     * @param callable $callback The step to run
+     *
+     * @throws ConnectionException if the step fails
+     */
+    protected function connectionStep(string $step, callable $callback) : void
+    {
+        $server = $this->configs['host'] . ':' . $this->configs['port'];
+        try {
+            $result = $callback();
+        } catch (RedisException $exception) {
+            throw new ConnectionException(
+                "Cache (redis): {$step} failed on {$server}. " . $exception->getMessage(),
+                0,
+                $exception
+            );
+        }
+        if ($result === false) {
+            throw new ConnectionException(
+                "Cache (redis): {$step} failed on {$server}"
+            );
         }
     }
 

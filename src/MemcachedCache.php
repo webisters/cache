@@ -14,7 +14,6 @@ use Framework\Log\LogLevel;
 use Memcached;
 use OutOfBoundsException;
 use Override;
-use RuntimeException;
 use SensitiveParameter;
 
 /**
@@ -227,8 +226,43 @@ class MemcachedCache extends Cache
         if ($result === false) {
             $this->log('Cache (memcached): ' . $this->memcached->getLastErrorMessage());
         }
-        if (!$this->memcached->getStats()) {
-            throw new RuntimeException('Cache (memcached): Could not connect to any server');
+        $this->assertPoolIsReachable($pool);
+    }
+
+    /**
+     * Make sure at least one server in the pool answers.
+     *
+     * getStats returns an entry per server, holding false for the ones that
+     * could not be reached. The array itself is not empty in that case, so it
+     * has to be looked into rather than just tested for truth, or a pool where
+     * every server is down would pass for connected.
+     *
+     * @since 4.2
+     *
+     * @param array<int,string> $pool The servers that were added
+     *
+     * @throws ConnectionException if no server in the pool answers
+     */
+    protected function assertPoolIsReachable(array $pool) : void
+    {
+        if (!$pool) {
+            throw new ConnectionException(
+                'Cache (memcached): No server was added to the pool'
+            );
         }
+        $stats = $this->memcached->getStats();
+        if (\is_array($stats)) {
+            foreach ($stats as $stat) {
+                if ($stat !== false) {
+                    return;
+                }
+            }
+        }
+        $message = $this->memcached->getLastErrorMessage();
+        throw new ConnectionException(
+            'Cache (memcached): Could not connect to any server in the pool: '
+            . \implode(', ', $pool)
+            . ($message === '' ? '' : '. ' . $message)
+        );
     }
 }
