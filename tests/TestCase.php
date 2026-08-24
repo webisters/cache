@@ -82,10 +82,10 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
     public function testSetAndGet() : void
     {
         self::assertNull($this->cache->get('foo'));
-        self::assertTrue($this->cache->set('foo', 'bar', static::SHORT_TTL));
+        self::assertTrue($this->cache->set('foo', 'bar', static::LIVE_TTL));
         self::assertSame('bar', $this->cache->get('foo'));
-        \sleep(static::EXPIRY_WAIT);
-        self::assertNull($this->cache->get('foo'));
+        // Expiry is asserted in testExpiryAcrossTheApi, which is the one test
+        // here that waits. See the note on its wait.
     }
 
     public function testSetAndGetNullAndFalseValues() : void
@@ -106,17 +106,13 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         );
         self::assertSame(
             ['foo' => true, 'bar' => true],
-            $this->cache->setMulti(['foo' => 'x', 'bar' => 'y'], static::SHORT_TTL)
+            $this->cache->setMulti(['foo' => 'x', 'bar' => 'y'], static::LIVE_TTL)
         );
         self::assertSame(
             ['bar' => 'y', 'foo' => 'x', 'baz' => null],
             $this->cache->getMulti(['bar', 'foo', 'baz'])
         );
-        \sleep(static::EXPIRY_WAIT);
-        self::assertSame(
-            ['foo' => null, 'bar' => null],
-            $this->cache->getMulti(['foo', 'bar'])
-        );
+        // getMulti over expired items is asserted in testExpiryAcrossTheApi.
     }
 
     public function testDelete() : void
@@ -224,13 +220,12 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         self::assertSame('third', $this->cache->get('foo'));
     }
 
-    public function testAddAfterExpiration() : void
+    public function testAddRefusesWhileTheItemLives() : void
     {
-        self::assertTrue($this->cache->add('foo', 'first', static::SHORT_TTL));
-        self::assertFalse($this->cache->add('foo', 'second', static::SHORT_TTL));
-        \sleep(static::EXPIRY_WAIT);
-        self::assertTrue($this->cache->add('foo', 'third', static::LIVE_TTL));
-        self::assertSame('third', $this->cache->get('foo'));
+        self::assertTrue($this->cache->add('foo', 'first', static::LIVE_TTL));
+        self::assertFalse($this->cache->add('foo', 'second', static::LIVE_TTL));
+        self::assertSame('first', $this->cache->get('foo'));
+        // Adding over an expired item is asserted in testExpiryAcrossTheApi.
     }
 
     public function testLockAndUnlock() : void
@@ -395,10 +390,10 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         self::assertSame(1, $this->cache->increment('i'));
         self::assertSame(2, $this->cache->increment('i'));
         self::assertSame(5, $this->cache->increment('i', 3));
-        self::assertSame(6, $this->cache->increment('i', 1, static::SHORT_TTL));
-        \sleep(static::EXPIRY_WAIT);
-        self::assertSame(1, $this->cache->increment('i'));
-        self::assertSame(11, $this->cache->increment('i', 10));
+        self::assertSame(6, $this->cache->increment('i', 1, static::LIVE_TTL));
+        self::assertSame(16, $this->cache->increment('i', 10));
+        // A counter starting over once it expired is asserted in
+        // testExpiryAcrossTheApi.
     }
 
     public function testDecrement() : void
@@ -406,16 +401,18 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         self::assertSame(-1, $this->cache->decrement('i'));
         self::assertSame(-2, $this->cache->decrement('i'));
         self::assertSame(-5, $this->cache->decrement('i', 3));
-        self::assertSame(-6, $this->cache->decrement('i', 1, static::SHORT_TTL));
-        \sleep(static::EXPIRY_WAIT);
-        self::assertSame(-1, $this->cache->decrement('i'));
-        self::assertSame(-11, $this->cache->decrement('i', 10));
+        self::assertSame(-6, $this->cache->decrement('i', 1, static::LIVE_TTL));
+        self::assertSame(-16, $this->cache->decrement('i', 10));
+        // A counter starting over once it expired is asserted in
+        // testExpiryAcrossTheApi.
     }
 
     public function testExpiryAcrossTheApi() : void
     {
-        // One wait covering every way an item can be reached, because a sleep
-        // here is paid once per driver and per serializer.
+        // The only test here that waits. A sleep is paid once per driver and
+        // per serializer, so around thirty times, which is why everything
+        // time-dependent is asserted behind this one wait rather than each
+        // test buying its own. Anything needing a clock belongs here.
         $calls = 0;
         $callback = static function () use (&$calls) {
             $calls++;
@@ -429,6 +426,8 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
             $this->cache->remember('remembered', $callback, static::SHORT_TTL)
         );
         self::assertSame(1, $this->cache->increment('counted', 1, static::SHORT_TTL));
+        self::assertTrue($this->cache->add('added', 'first', static::SHORT_TTL));
+        self::assertFalse($this->cache->add('added', 'second', static::SHORT_TTL));
         // Writing again replaces the life left, it does not add to it.
         self::assertTrue($this->cache->set('renewed', 'r', static::SHORT_TTL));
         self::assertTrue($this->cache->set('renewed', 'r', static::LIVE_TTL));
@@ -448,6 +447,9 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         self::assertSame(2, $calls, 'remember must compute again once it expired');
         // A counter that expired starts over rather than carrying on.
         self::assertSame(1, $this->cache->increment('counted', 1, static::SHORT_TTL));
+        // An expired item is not an item, so add takes the name again.
+        self::assertTrue($this->cache->add('added', 'third', static::LIVE_TTL));
+        self::assertSame('third', $this->cache->get('added'));
     }
 
     public function testCounterStartsFromAStoredNumber() : void
