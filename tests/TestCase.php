@@ -142,6 +142,59 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         );
     }
 
+    public function testRemember() : void
+    {
+        $calls = 0;
+        $callback = static function () use (&$calls) {
+            $calls++;
+            return 'computed';
+        };
+        self::assertNull($this->cache->get('foo'));
+        self::assertSame('computed', $this->cache->remember('foo', $callback, 60));
+        self::assertSame('computed', $this->cache->remember('foo', $callback, 60));
+        self::assertSame('computed', $this->cache->get('foo'));
+        self::assertSame(1, $calls);
+    }
+
+    public function testRememberDoesNotStoreNull() : void
+    {
+        $calls = 0;
+        $callback = static function () use (&$calls) {
+            $calls++;
+            return null;
+        };
+        self::assertNull($this->cache->remember('foo', $callback, 60));
+        self::assertNull($this->cache->remember('foo', $callback, 60));
+        self::assertSame(2, $calls);
+    }
+
+    public function testGetOrSet() : void
+    {
+        $calls = 0;
+        $callback = static function () use (&$calls) {
+            $calls++;
+            return 'computed';
+        };
+        self::assertSame('computed', $this->cache->getOrSet('foo', $callback, 60));
+        self::assertSame('computed', $this->cache->remember('foo', $callback, 60));
+        self::assertSame(1, $calls);
+    }
+
+    public function testTaggedRemember() : void
+    {
+        $calls = 0;
+        $callback = static function () use (&$calls) {
+            $calls++;
+            return 'computed';
+        };
+        self::assertSame('computed', $this->cache->tags('posts')->remember('list', $callback, 60));
+        self::assertSame('computed', $this->cache->tags('posts')->remember('list', $callback, 60));
+        self::assertSame(1, $calls);
+        self::assertTrue($this->cache->tags('posts')->flush());
+        self::assertSame('computed', $this->cache->tags('posts')->remember('list', $callback, 60));
+        self::assertSame(2, $calls);
+    }
+
     public function testTagsSetAndGet() : void
     {
         self::assertNull($this->cache->tags('posts')->get('list'));

@@ -248,6 +248,61 @@ class TaggedCache
     }
 
     /**
+     * Gets one tagged item from the cache storage, computing and storing it
+     * when it is not there yet.
+     *
+     * ```php
+     * $posts = $cache->tags('posts')->remember('list', function () {
+     *     return $this->database->select()->from('posts')->run()->fetchArrayAll();
+     * }, 300);
+     * ```
+     *
+     * The callback runs only on a miss, which includes the case where the tags
+     * were invalidated since the item was written.
+     *
+     * When the callback returns null nothing is stored, since a null item is
+     * indistinguishable from a missing one, and the callback runs again on the
+     * next call.
+     *
+     * @param string $key The item name
+     * @param callable $callback Called on a miss to compute the item value.
+     * Receives the item name as its only argument
+     * @param int|null $ttl The Time To Live for the item or null to use the default
+     *
+     * @return mixed The cached value, or the value returned by the callback
+     */
+    public function remember(string $key, callable $callback, ?int $ttl = null) : mixed
+    {
+        $value = $this->get($key);
+        if ($value !== null) {
+            return $value;
+        }
+        $value = $callback($key);
+        if ($value !== null) {
+            $this->set($key, $value, $ttl);
+        }
+        return $value;
+    }
+
+    /**
+     * Gets one tagged item from the cache storage, computing and storing it
+     * when it is not there yet.
+     *
+     * Alias of the remember method.
+     *
+     * @param string $key The item name
+     * @param callable $callback Called on a miss to compute the item value.
+     * Receives the item name as its only argument
+     * @param int|null $ttl The Time To Live for the item or null to use the default
+     *
+     * @return mixed The cached value, or the value returned by the callback
+     */
+    public function getOrSet(string $key, callable $callback, ?int $ttl = null) : mixed
+    {
+        return $this->remember($key, $callback, $ttl);
+    }
+
+    /**
      * Invalidates every item stored under this instance tags.
      *
      * Items tagged with any of the tags become unreachable at once. Items that
