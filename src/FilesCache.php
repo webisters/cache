@@ -111,23 +111,92 @@ class FilesCache extends Cache
      * directory and delete what they find in it, so pointing the cache at a
      * directory shared with other processes would put their files at risk.
      *
+     * The path carries the user id and the directory is created as 0700,
+     * because on many systems the temp directory is world writable and cached
+     * items are unserialized when read. Anyone able to drop a file in here
+     * would be handing this process arbitrary objects to build. For the same
+     * reason an existing path is only accepted when it is a real directory
+     * owned by this user and closed to everybody else.
+     *
      * The resolved path is recorded in the configs, which is what scopes the
      * directory check in openDir.
      *
-     * @throws RuntimeException if the directory does not exist and cannot be created
+     * @throws RuntimeException if the directory cannot be created or is not
+     * private to this user
      *
      * @return string The directory path
      */
     protected function makeDefaultDirectory() : string
     {
-        $path = \sys_get_temp_dir() . \DIRECTORY_SEPARATOR . 'webisters-cache';
-        if (!\is_dir($path) && !\mkdir($path, 0777, true) && !\is_dir($path)) {
+        $path = \sys_get_temp_dir() . \DIRECTORY_SEPARATOR
+            . 'webisters-cache-' . $this->getUserId();
+        if (\is_link($path)) {
+            throw new RuntimeException(
+                "Default cache directory must not be a symbolic link: {$path}"
+            );
+        }
+        if (!\is_dir($path) && !@\mkdir($path, 0700, true) && !\is_dir($path)) {
             throw new RuntimeException(
                 "Default cache directory was not created: {$path}"
             );
         }
+        $this->assertPrivateDirectory($path);
         $this->configs['directory'] = $path;
         return $path;
+    }
+
+    /**
+     * Identify the user this process runs as, to keep the default directory of
+     * one user out of the reach of the others.
+     *
+     * @return string
+     */
+    protected function getUserId() : string
+    {
+        if (\function_exists('posix_geteuid')) {
+            return (string) \posix_geteuid();
+        }
+        $user = \getenv('USER');
+        if ($user === false || $user === '') {
+            $user = \getenv('USERNAME');
+        }
+        if ($user === false || $user === '') {
+            return 'shared';
+        }
+        return \substr(\preg_replace('/[^A-Za-z0-9_-]/', '', $user) ?? '', 0, 32)
+            ?: 'shared';
+    }
+
+    /**
+     * Make sure a directory is owned by this user and closed to everybody else.
+     *
+     * Only meaningful where the temp directory is shared between users. On
+     * Windows every user gets their own temp directory, and the permission
+     * bits do not map onto its access control lists, so the check is skipped.
+     *
+     * @param string $path The directory path
+     *
+     * @throws RuntimeException if the directory is not private to this user
+     */
+    protected function assertPrivateDirectory(string $path) : void
+    {
+        if (\DIRECTORY_SEPARATOR !== '/') {
+            return;
+        }
+        if (\function_exists('posix_geteuid')) {
+            $owner = @\fileowner($path);
+            if ($owner !== false && $owner !== \posix_geteuid()) {
+                throw new RuntimeException(
+                    "Default cache directory is not owned by this user: {$path}"
+                );
+            }
+        }
+        $permissions = @\fileperms($path);
+        if ($permissions !== false && ($permissions & 0o077) !== 0) {
+            throw new RuntimeException(
+                "Default cache directory is accessible to other users: {$path}"
+            );
+        }
     }
 
     public function get(string $key) : mixed

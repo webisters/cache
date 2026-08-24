@@ -106,6 +106,21 @@ class FilesCacheTest extends TestCase
         self::assertNull($cache->get('foo'));
     }
 
+    public function testDefaultDirectoryIsPrivateToTheUser() : void
+    {
+        if (\DIRECTORY_SEPARATOR !== '/') {
+            self::markTestSkipped('POSIX permission bits only');
+        }
+        $cache = new FilesCache();
+        $directory = (new \ReflectionProperty(FilesCache::class, 'configs'))
+            ->getValue($cache)['directory'];
+        self::assertDirectoryExists($directory);
+        self::assertStringContainsString('webisters-cache-', $directory);
+        // The temp directory is shared, and cached items are unserialized when
+        // read, so nobody else may write here.
+        self::assertSame(0, \fileperms($directory) & 0o077);
+    }
+
     public function testDefaultDirectoryIsNotTheSharedTempDirectory() : void
     {
         // flush and gc unlink what they find in the cache directory, so the
