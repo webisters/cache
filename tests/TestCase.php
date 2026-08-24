@@ -236,6 +236,38 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         self::assertTrue($this->cache->lock('report'));
     }
 
+    public function testOrdinaryKeysCannotReachTheBookkeeping() : void
+    {
+        // These names used to be exactly what the library called its own
+        // lock and metadata, so storing them broke locking outright.
+        self::assertTrue($this->cache->set('lock.report', 'mine', static::LIVE_TTL));
+        self::assertTrue($this->cache->set('stampede.report', 'mine', static::LIVE_TTL));
+        self::assertTrue($this->cache->set('tag.version.posts', 'mine', static::LIVE_TTL));
+        self::assertTrue($this->cache->lock('report'), 'an item must not block a lock');
+        self::assertSame('mine', $this->cache->get('lock.report'));
+        self::assertSame(
+            'computed',
+            $this->cache->rememberProtected('report2', static fn () => 'computed', static::LIVE_TTL)
+        );
+        self::assertSame('mine', $this->cache->get('stampede.report'));
+        self::assertTrue($this->cache->tags('posts')->set('list', 'tagged', static::LIVE_TTL));
+        self::assertSame('mine', $this->cache->get('tag.version.posts'));
+        self::assertSame('tagged', $this->cache->tags('posts')->get('list'));
+        self::assertTrue($this->cache->unlock('report'));
+    }
+
+    public function testACounterIsNotSlowedByAnOrdinaryKey() : void
+    {
+        // A key named after the lock used to make every move of the matching
+        // counter wait out the whole lock wait and then count unprotected.
+        self::assertTrue($this->cache->set('lock.hits', 'mine', static::LIVE_TTL));
+        $this->cache->setLockWait(0.2);
+        $start = \microtime(true);
+        self::assertSame(1, $this->cache->increment('hits', 1, static::LIVE_TTL));
+        self::assertLessThan(0.2, \microtime(true) - $start);
+        self::assertSame('mine', $this->cache->get('lock.hits'));
+    }
+
     public function testLockDoesNotTouchTheItem() : void
     {
         self::assertTrue($this->cache->set('report', 'value', 60));
