@@ -10,9 +10,11 @@
 namespace Framework\Cache\Debug;
 
 use Framework\Cache\ApcuCache;
+use Framework\Cache\ArrayCache;
 use Framework\Cache\DatabaseCache;
 use Framework\Cache\FilesCache;
 use Framework\Cache\MemcachedCache;
+use Framework\Cache\NullCache;
 use Framework\Cache\RedisCache;
 use Framework\Debug\Collector;
 use Framework\Debug\Debugger;
@@ -151,9 +153,11 @@ class CacheCollector extends Collector
     {
         foreach ([
             'apcu' => ApcuCache::class,
+            'array' => ArrayCache::class,
             'database' => DatabaseCache::class,
             'files' => FilesCache::class,
             'memcached' => MemcachedCache::class,
+            'null' => NullCache::class,
             'redis' => RedisCache::class,
         ] as $name => $class) {
             if ($this->info['class'] === $class) {
