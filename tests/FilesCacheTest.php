@@ -210,15 +210,40 @@ class FilesCacheTest extends TestCase
             $this->markTestIncomplete();
         }
         self::assertTrue($this->cache->set('key', 'value'));
-        $key = \md5('key');
-        $subdir = $key[0] . $key[1] . '/';
-        $prefix = '';
-        if ($this->prefix !== '') {
-            $prefix = $this->prefix . '/';
+        // An item is written to a temporary file and renamed into place, so a
+        // write fails when the directory will not take a new file. Making the
+        // item's own file read only no longer stops it, see
+        // testReadOnlyItemFileIsStillReplaceable.
+        $directory = $this->renderItemDirectory('key');
+        \exec('chmod 500 ' . $directory);
+        try {
+            self::assertFalse($this->cache->set('key', 'value'));
+        } finally {
+            \exec('chmod 755 ' . $directory);
         }
-        $dir = $this->configs['directory'] . $prefix;
-        \exec('chmod 444 ' . $dir . $subdir . '*');
-        self::assertFalse($this->cache->set('key', 'value'));
+    }
+
+    public function testReadOnlyItemFileIsStillReplaceable() : void
+    {
+        if (\getenv('GITLAB_CI')) {
+            $this->markTestIncomplete();
+        }
+        self::assertTrue($this->cache->set('key', 'value'));
+        \exec('chmod 444 ' . $this->renderItemDirectory('key') . '/*');
+        // Renaming over a file needs write permission on the directory, not on
+        // the file, so a read only item no longer wedges its key for good.
+        self::assertTrue($this->cache->set('key', 'new value'));
+        self::assertSame('new value', $this->cache->get('key'));
+    }
+
+    /**
+     * Path of the directory holding an item, as renderFilepath lays it out.
+     */
+    protected function renderItemDirectory(string $key) : string
+    {
+        $hash = \md5($key);
+        $prefix = $this->prefix === '' ? '' : $this->prefix . '/';
+        return $this->configs['directory'] . $prefix . $hash[0] . $hash[1];
     }
 
     public function testGetFailure() : void

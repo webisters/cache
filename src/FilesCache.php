@@ -323,6 +323,15 @@ class FilesCache extends Cache
             $this->log("Cache (files): Temporary file could not be created in '{$directory}'");
             return false;
         }
+        // tempnam quietly falls back to the system temp directory when it
+        // cannot write in the one it was given. Moving a file from there would
+        // cross file systems, turning the rename that follows into a copy and
+        // losing the atomicity this is all for.
+        if (\realpath(\dirname($temporary)) !== \realpath($directory)) {
+            @\unlink($temporary);
+            $this->log("Cache (files): Temporary file could not be created in '{$directory}'");
+            return false;
+        }
         if (@\file_put_contents($temporary, $contents) === false) {
             @\unlink($temporary);
             $this->log("Cache (files): Temporary file '{$temporary}' could not be written");
