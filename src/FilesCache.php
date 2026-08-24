@@ -51,6 +51,14 @@ class FilesCache extends Cache
      * @var string|null
      */
     protected ?string $baseDirectory;
+    /**
+     * Files removed by the collection currently running.
+     *
+     * @since 4.2
+     *
+     * @var int
+     */
+    protected int $purged = 0;
 
     /**
      * FilesCache constructor.
@@ -84,9 +92,19 @@ class FilesCache extends Cache
         $this->setGC($this->configs['gc']);
     }
 
+    /**
+     * Check the percentage of destructs that collect expired items.
+     *
+     * Zero turns the inline collection off, for setups running purge from a
+     * scheduled job instead.
+     *
+     * @param int $gc A percentage from 0 to 100
+     *
+     * @throws InvalidArgumentException if $gc is outside that range
+     */
     protected function setGC(int $gc) : void
     {
-        if ($gc < 1 || $gc > 100) {
+        if ($gc < 0 || $gc > 100) {
             throw new InvalidArgumentException(
                 "Invalid cache GC: {$gc}"
             );
@@ -476,6 +494,36 @@ class FilesCache extends Cache
         return $this->deleteExpired($this->baseDirectory);
     }
 
+    /**
+     * Delete every expired item and report how many files went.
+     *
+     * Expired items are skipped on read but stay on disk until something
+     * removes them, so a cache with a lot of short lived keys keeps growing.
+     * This is the maintenance entry point for a scheduled job, its count
+     * being something a cron job can log or alert on:
+     *
+     * ```php
+     * $removed = $cache->purge();
+     * ```
+     *
+     * Set the `gc` config to 0 to leave collection entirely to that job,
+     * rather than paying for it on a share of the requests.
+     *
+     * A failure part way through is logged, and what was removed up to that
+     * point is still counted.
+     *
+     * @since 4.2
+     *
+     * @return int Number of files removed, expired items and abandoned
+     * temporary files together
+     */
+    public function purge() : int
+    {
+        $this->purged = 0;
+        $this->deleteExpired($this->baseDirectory);
+        return $this->purged;
+    }
+
     protected function deleteExpired(string $baseDirectory) : bool
     {
         $handle = $this->openDir($baseDirectory);
@@ -493,6 +541,9 @@ class FilesCache extends Cache
                 \str_starts_with($filename, static::TEMPORARY_PREFIX)
                     ? $this->deleteAbandonedTemporaryFile($path)
                     : $this->getContents($path);
+                if (!\is_file($path)) {
+                    $this->purged++;
+                }
                 continue;
             }
             if (!$this->deleteExpired($path)) {

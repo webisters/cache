@@ -166,13 +166,29 @@ class ArrayCache extends Cache
      */
     public function gc() : bool
     {
+        $this->purge();
+        return true;
+    }
+
+    /**
+     * Delete every expired item and report how many went.
+     *
+     * Expired items are already invisible to reads, so this is only about
+     * giving their memory back on a long running process.
+     *
+     * @return int Number of items removed
+     */
+    public function purge() : int
+    {
         $now = \time();
+        $purged = 0;
         foreach ($this->storage as $key => $item) {
             if ($item['ttl'] <= $now) {
                 unset($this->storage[$key]);
+                $purged++;
             }
         }
-        return true;
+        return $purged;
     }
 
     /**

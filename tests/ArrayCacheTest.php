@@ -63,6 +63,18 @@ class ArrayCacheTest extends TestCase
         self::assertTrue($this->cache->delete('foo'));
     }
 
+    public function testPurgeReportsWhatItRemoved() : void
+    {
+        self::assertTrue($this->cache->set('gone', 'x', 1));
+        self::assertTrue($this->cache->set('also-gone', 'y', 1));
+        self::assertTrue($this->cache->set('kept', 'z', 60));
+        \sleep(2);
+        self::assertSame(2, $this->cache->purge()); // @phpstan-ignore-line
+        self::assertSame(0, $this->cache->purge()); // @phpstan-ignore-line
+        self::assertSame(1, $this->cache->count()); // @phpstan-ignore-line
+        self::assertSame('z', $this->cache->get('kept'));
+    }
+
     public function testCountAndGarbageCollector() : void
     {
         self::assertSame(0, $this->cache->count()); // @phpstan-ignore-line
