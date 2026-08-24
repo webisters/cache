@@ -412,6 +412,38 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         self::assertSame(-11, $this->cache->decrement('i', 10));
     }
 
+    public function testCounterDoesNotLoseAConcurrentMove() : void
+    {
+        // The lock a counter takes is the item's own, so a worker holding it
+        // stands in for the concurrent one that used to make an increment
+        // vanish. The move still has to land, and land on top of what is
+        // already there rather than replacing it.
+        self::assertSame(5, $this->cache->increment('hits', 5, static::LIVE_TTL));
+        self::assertTrue($this->cache->lock('hits'));
+        $this->cache->setLockWait(0.05);
+        self::assertSame(6, $this->cache->increment('hits', 1, static::LIVE_TTL));
+        self::assertSame(6, $this->cache->get('hits'));
+        self::assertTrue($this->cache->unlock('hits'));
+    }
+
+    public function testCounterReleasesItsLock() : void
+    {
+        self::assertSame(1, $this->cache->increment('hits', 1, static::LIVE_TTL));
+        // Free for the next mover, otherwise every later one would wait it out.
+        self::assertTrue($this->cache->lock('hits'));
+        self::assertTrue($this->cache->unlock('hits'));
+        self::assertSame(2, $this->cache->increment('hits', 1, static::LIVE_TTL));
+        self::assertTrue($this->cache->lock('hits'));
+    }
+
+    public function testCounterDoesNotDisturbTheItemsLockedName() : void
+    {
+        self::assertTrue($this->cache->set('hits', 40, static::LIVE_TTL));
+        self::assertSame(42, $this->cache->increment('hits', 2, static::LIVE_TTL));
+        // The lock lives under a name of its own, never over the counter.
+        self::assertSame(42, $this->cache->get('hits'));
+    }
+
     public function testIncrementAndDecrement() : void
     {
         self::assertSame(1, $this->cache->increment('id'));
