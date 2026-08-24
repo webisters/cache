@@ -412,6 +412,74 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         self::assertSame(-11, $this->cache->decrement('i', 10));
     }
 
+    public function testExpiryAcrossTheApi() : void
+    {
+        // One wait covering every way an item can be reached, because a sleep
+        // here is paid once per driver and per serializer.
+        $calls = 0;
+        $callback = static function () use (&$calls) {
+            $calls++;
+            return 'computed';
+        };
+        self::assertTrue($this->cache->set('short', 'x', static::SHORT_TTL));
+        self::assertTrue($this->cache->set('long', 'y', static::LIVE_TTL));
+        self::assertTrue($this->cache->tags('posts')->set('tagged', 'z', static::SHORT_TTL));
+        self::assertSame(
+            'computed',
+            $this->cache->remember('remembered', $callback, static::SHORT_TTL)
+        );
+        self::assertSame(1, $this->cache->increment('counted', 1, static::SHORT_TTL));
+        // Writing again replaces the life left, it does not add to it.
+        self::assertTrue($this->cache->set('renewed', 'r', static::SHORT_TTL));
+        self::assertTrue($this->cache->set('renewed', 'r', static::LIVE_TTL));
+        \sleep(static::EXPIRY_WAIT);
+        self::assertNull($this->cache->get('short'));
+        self::assertSame('y', $this->cache->get('long'), 'expiry must be per item');
+        self::assertNull($this->cache->tags('posts')->get('tagged'));
+        self::assertSame('r', $this->cache->get('renewed'));
+        self::assertSame(
+            ['short' => null, 'long' => 'y'],
+            $this->cache->getMulti(['short', 'long'])
+        );
+        self::assertSame(
+            'computed',
+            $this->cache->remember('remembered', $callback, static::SHORT_TTL)
+        );
+        self::assertSame(2, $calls, 'remember must compute again once it expired');
+        // A counter that expired starts over rather than carrying on.
+        self::assertSame(1, $this->cache->increment('counted', 1, static::SHORT_TTL));
+    }
+
+    public function testCounterStartsFromAStoredNumber() : void
+    {
+        self::assertTrue($this->cache->set('hits', 40, static::LIVE_TTL));
+        self::assertSame(42, $this->cache->increment('hits', 2, static::LIVE_TTL));
+        self::assertSame(40, $this->cache->decrement('hits', 2, static::LIVE_TTL));
+    }
+
+    public function testCounterTreatsTheOffsetAsItsMagnitude() : void
+    {
+        // increment always goes up and decrement always goes down, whatever
+        // the sign of the offset.
+        self::assertSame(5, $this->cache->increment('up', -5, static::LIVE_TTL));
+        self::assertSame(-5, $this->cache->decrement('down', -5, static::LIVE_TTL));
+    }
+
+    public function testCounterOfANonNumericItemStartsFromZero() : void
+    {
+        self::assertTrue($this->cache->set('hits', 'abc', static::LIVE_TTL));
+        self::assertSame(1, $this->cache->increment('hits', 1, static::LIVE_TTL));
+    }
+
+    public function testCounterCrossesZero() : void
+    {
+        self::assertSame(2, $this->cache->increment('hits', 2, static::LIVE_TTL));
+        self::assertSame(0, $this->cache->decrement('hits', 2, static::LIVE_TTL));
+        // Zero is a value, not an absent item, so counting carries on from it.
+        self::assertSame(-3, $this->cache->decrement('hits', 3, static::LIVE_TTL));
+        self::assertSame(1, $this->cache->increment('hits', 4, static::LIVE_TTL));
+    }
+
     public function testCounterDoesNotLoseAConcurrentMove() : void
     {
         // The lock a counter takes is the item's own, so a worker holding it
