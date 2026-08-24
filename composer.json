@@ -12,7 +12,9 @@
         "igbinary",
         "json",
         "json-array",
-        "msgpack"
+        "msgpack",
+        "psr-16",
+        "simple-cache"
     ],
     "authors": [
         {
@@ -42,12 +44,14 @@
         "webisters/log": "*"
     },
     "require-dev": {
-        "webisters/coding-standard": "*",
-        "webisters/database": "*",
         "jetbrains/phpstorm-attributes": "^1.0",
-        "phpunit/phpunit": "^10.5"
+        "phpunit/phpunit": "^10.5",
+        "psr/simple-cache": "^3.0",
+        "webisters/coding-standard": "*",
+        "webisters/database": "*"
     },
     "suggest": {
+        "psr/simple-cache": "Required by the SimpleCache adapter, to hand this cache to a library that asks for PSR-16",
         "webisters/database": "Required by the DatabaseCache driver, for a cache that survives restarts"
     },
     "minimum-stability": "dev",
