@@ -91,6 +91,56 @@ class FilesCacheTest extends TestCase
         self::assertInstanceOf(FilesCache::class, new FilesCache());
     }
 
+    public function testDefaultConfigsGarbageCollector() : void
+    {
+        $cache = new FilesCache();
+        self::assertTrue($cache->gc());
+    }
+
+    public function testDefaultConfigsRoundTrip() : void
+    {
+        $cache = new FilesCache();
+        self::assertTrue($cache->set('foo', 'bar', 60));
+        self::assertSame('bar', $cache->get('foo'));
+        self::assertTrue($cache->flush());
+        self::assertNull($cache->get('foo'));
+    }
+
+    public function testDefaultDirectoryIsPrivateToTheUser() : void
+    {
+        if (\DIRECTORY_SEPARATOR !== '/') {
+            self::markTestSkipped('POSIX permission bits only');
+        }
+        $cache = new FilesCache();
+        $directory = (new \ReflectionProperty(FilesCache::class, 'configs'))
+            ->getValue($cache)['directory'];
+        self::assertDirectoryExists($directory);
+        self::assertStringContainsString('webisters-cache-', $directory);
+        // The temp directory is shared, and cached items are unserialized when
+        // read, so nobody else may write here.
+        self::assertSame(0, \fileperms($directory) & 0o077);
+    }
+
+    public function testDefaultDirectoryIsNotTheSharedTempDirectory() : void
+    {
+        // flush and gc unlink what they find in the cache directory, so the
+        // default must be a directory of this library's own. A file sitting
+        // directly in the system temp directory has to survive both.
+        $foreign = \sys_get_temp_dir() . \DIRECTORY_SEPARATOR . 'not-a-cache-file.txt';
+        \file_put_contents($foreign, 'keep me');
+        try {
+            $cache = new FilesCache();
+            self::assertTrue($cache->set('foo', 'bar', 60));
+            self::assertTrue($cache->gc());
+            self::assertFileExists($foreign);
+            self::assertTrue($cache->flush());
+            self::assertFileExists($foreign);
+            self::assertSame('keep me', \file_get_contents($foreign));
+        } finally {
+            \unlink($foreign);
+        }
+    }
+
     public function testCacheDirectoryIsNotWritable() : void
     {
         if (\getenv('GITLAB_CI')) {
