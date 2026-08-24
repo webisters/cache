@@ -106,6 +106,56 @@ class FilesCacheTest extends TestCase
         self::assertNull($cache->get('foo'));
     }
 
+    public function testOverwritingLeavesNoTemporaryFilesBehind() : void
+    {
+        for ($i = 0; $i < 5; $i++) {
+            self::assertTrue($this->cache->set('foo', 'value-' . $i, 60));
+        }
+        self::assertTrue($this->cache->add('bar', 'added', 60));
+        self::assertSame('value-4', $this->cache->get('foo'));
+        self::assertSame('added', $this->cache->get('bar'));
+        self::assertSame([], $this->findTemporaryFiles());
+    }
+
+    public function testGarbageCollectorSparesTemporaryFilesInFlight() : void
+    {
+        self::assertTrue($this->cache->set('foo', 'bar', 60));
+        $directory = $this->configs['directory'] . $this->prefix
+            . \DIRECTORY_SEPARATOR . 'zz';
+        \mkdir($directory, 0777, true);
+        $fresh = $directory . \DIRECTORY_SEPARATOR . 'tmp-fresh';
+        $abandoned = $directory . \DIRECTORY_SEPARATOR . 'tmp-abandoned';
+        \file_put_contents($fresh, 'half written');
+        \file_put_contents($abandoned, 'half written');
+        \touch($abandoned, \time() - 3600);
+        self::assertTrue($this->cache->gc()); // @phpstan-ignore-line
+        // A temporary file that is still fresh may belong to a write happening
+        // right now, so only the abandoned one is collected.
+        self::assertFileExists($fresh);
+        self::assertFileDoesNotExist($abandoned);
+        self::assertSame('bar', $this->cache->get('foo'));
+    }
+
+    /**
+     * @return array<int,string>
+     */
+    protected function findTemporaryFiles() : array
+    {
+        $found = [];
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator(
+                $this->configs['directory'],
+                \FilesystemIterator::SKIP_DOTS
+            )
+        );
+        foreach ($iterator as $file) {
+            if ($file->isFile() && \str_starts_with($file->getFilename(), 'tmp-')) {
+                $found[] = $file->getFilename();
+            }
+        }
+        return $found;
+    }
+
     public function testDefaultDirectoryIsPrivateToTheUser() : void
     {
         if (\DIRECTORY_SEPARATOR !== '/') {
