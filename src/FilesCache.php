@@ -12,6 +12,7 @@ namespace Framework\Cache;
 use Framework\Log\Logger;
 use InvalidArgumentException;
 use JetBrains\PhpStorm\Pure;
+use Override;
 use RuntimeException;
 use SensitiveParameter;
 
@@ -188,6 +189,87 @@ class FilesCache extends Cache
             return false;
         }
         return true;
+    }
+
+    #[Override]
+    public function add(string $key, mixed $value, ?int $ttl = null) : bool
+    {
+        if (isset($this->debugCollector)) {
+            $start = \microtime(true);
+            return $this->addDebugSet(
+                $key,
+                $ttl,
+                $start,
+                $value,
+                $this->addValue($key, $value, $ttl)
+            );
+        }
+        return $this->addValue($key, $value, $ttl);
+    }
+
+    /**
+     * Write an item only if its file is not already there.
+     *
+     * The exclusive create mode of fopen is what makes this atomic: the file
+     * system refuses the second concurrent create. An expired file is removed
+     * first, since it no longer counts as an existing item.
+     *
+     * @since 4.2
+     *
+     * @param string $key The item name
+     * @param mixed $value The item value
+     * @param int|null $ttl The Time To Live for the item or null to use the default
+     *
+     * @return bool TRUE if the item was set, FALSE if it already existed or
+     * failed to be set
+     */
+    public function addValue(string $key, mixed $value, ?int $ttl = null) : bool
+    {
+        $filepath = $this->renderFilepath($key);
+        $this->createSubDirectory($filepath);
+        if ($this->isExpiredFile($filepath)) {
+            $this->deleteFile($filepath);
+        }
+        $handle = @\fopen($filepath, 'xb');
+        if ($handle === false) {
+            return false;
+        }
+        $contents = $this->serialize([
+            'ttl' => \time() + $this->makeTtl($ttl),
+            'data' => $value,
+        ]);
+        $written = \fwrite($handle, $contents);
+        \fclose($handle);
+        if ($written === false) {
+            $this->deleteFile($filepath);
+            $this->log("Cache (files): File '{$filepath}' could not be written");
+            return false;
+        }
+        \chmod($filepath, $this->configs['files_permission']);
+        return true;
+    }
+
+    /**
+     * Tell whether a file holds an item that is already expired.
+     *
+     * @since 4.2
+     *
+     * @param string $filepath
+     *
+     * @return bool TRUE when the file is there but no longer valid, FALSE when
+     * it is missing or still valid
+     */
+    protected function isExpiredFile(string $filepath) : bool
+    {
+        if (!\is_file($filepath)) {
+            return false;
+        }
+        $value = @\file_get_contents($filepath);
+        if ($value === false) {
+            return true;
+        }
+        $value = (array) $this->unserialize($value);
+        return !isset($value['ttl']) || $value['ttl'] <= \time();
     }
 
     public function delete(string $key) : bool
