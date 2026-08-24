@@ -385,7 +385,7 @@ class TaggedCache
      */
     protected function renderTagKey(string $tag) : string
     {
-        return 'tag.version.' . $tag;
+        return Cache::RESERVED_PREFIX . 'tag:' . $tag;
     }
 
     /**
@@ -403,7 +403,7 @@ class TaggedCache
             $versions[] = $tag . '=' . $this->getTagVersion($tag, $create);
         }
         $hash = \hash('sha256', \implode('|', $versions));
-        return 'tagged.' . \substr($hash, 0, 32) . '.';
+        return Cache::RESERVED_PREFIX . 'tagged:' . \substr($hash, 0, 32) . ':';
     }
 
     /**

@@ -27,6 +27,22 @@ use SensitiveParameter;
 abstract class Cache
 {
     /**
+     * Marks a key as this library's own bookkeeping rather than an item.
+     *
+     * Locks, recomputation metadata and tag versions all live in the same
+     * storage as the items, so they need somewhere an ordinary key will not
+     * reach. Names such as `lock.foo` were not enough: an application is quite
+     * entitled to store that, and then the two are the same item.
+     *
+     * The `@` and `:` here are among the characters PSR-16 reserves and
+     * forbids in a key, so nothing coming through the SimpleCache adapter can
+     * produce one of these, and no ordinary key is likely to either. Treat any
+     * key starting with this as belonging to the library.
+     *
+     * @since 4.2
+     */
+    public const RESERVED_PREFIX = '@w:';
+    /**
      * Driver specific configurations.
      *
      * @var array<string,mixed>
@@ -565,7 +581,7 @@ abstract class Cache
      */
     protected function renderLockKey(string $key) : string
     {
-        return 'lock.' . $key;
+        return static::RESERVED_PREFIX . 'lock:' . $key;
     }
 
     /**
@@ -579,7 +595,7 @@ abstract class Cache
      */
     protected function renderStampedeKey(string $key) : string
     {
-        return 'stampede.' . $key;
+        return static::RESERVED_PREFIX . 'stampede:' . $key;
     }
 
     /**

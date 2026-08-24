@@ -9,6 +9,7 @@
  */
 namespace Tests\Cache;
 
+use Framework\Cache\Cache;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 
@@ -85,13 +86,13 @@ final class StampedeTest extends TestCase
         $this->cache->setLockTtl(10);
         self::assertSame(10, $this->cache->getLockTtl());
         self::assertTrue($this->cache->lock('report'));
-        self::assertSame(10, $this->cache->getTtlOf('lock.report'));
+        self::assertSame(10, $this->cache->getTtlOf(Cache::RESERVED_PREFIX . 'lock:report'));
     }
 
     public function testLockTtlCanBeGivenPerCall() : void
     {
         self::assertTrue($this->cache->lock('report', 7));
-        self::assertSame(7, $this->cache->getTtlOf('lock.report'));
+        self::assertSame(7, $this->cache->getTtlOf(Cache::RESERVED_PREFIX . 'lock:report'));
     }
 
     public function testInvalidLockSettingsAreRejected() : void
@@ -190,7 +191,7 @@ final class StampedeTest extends TestCase
         // A value is in place, already past its recorded deadline so an early
         // recompute is certainly wanted, and a refresh is under way elsewhere.
         $this->cache->set('foo', 'stored', 60);
-        $this->cache->set('stampede.foo', '10|' . (\time() - 10), 60);
+        $this->cache->set(Cache::RESERVED_PREFIX . 'stampede:foo', '10|' . (\time() - 10), 60);
         self::assertTrue($this->cache->lock('foo'));
         $value = $this->cache->rememberProtected('foo', static function () : void {
             throw new \LogicException('Must not recompute while another worker holds the lock');
@@ -228,7 +229,7 @@ final class StampedeTest extends TestCase
     {
         // Past the recorded deadline, which any positive beta would refresh.
         $this->cache->set('foo', 'stored', 60);
-        $this->cache->set('stampede.foo', '10|' . (\time() - 10), 60);
+        $this->cache->set(Cache::RESERVED_PREFIX . 'stampede:foo', '10|' . (\time() - 10), 60);
         $value = $this->cache->rememberProtected('foo', static function () : void {
             throw new \LogicException('Must not recompute with beta at zero');
         }, 60, 0.0);
@@ -238,7 +239,7 @@ final class StampedeTest extends TestCase
     public function testRecomputesEarlyPastTheRecordedDeadline() : void
     {
         $this->cache->set('foo', 'stored', 60);
-        $this->cache->set('stampede.foo', '10|' . (\time() - 10), 60);
+        $this->cache->set(Cache::RESERVED_PREFIX . 'stampede:foo', '10|' . (\time() - 10), 60);
         $value = $this->cache->rememberProtected('foo', static fn () => 'refreshed', 60);
         self::assertSame('refreshed', $value);
         self::assertSame('refreshed', $this->cache->get('foo'));
@@ -247,7 +248,7 @@ final class StampedeTest extends TestCase
     public function testAnItemThatCostNothingIsNeverRecomputedEarly() : void
     {
         $this->cache->set('foo', 'stored', 60);
-        $this->cache->set('stampede.foo', '0|' . (\time() - 10), 60);
+        $this->cache->set(Cache::RESERVED_PREFIX . 'stampede:foo', '0|' . (\time() - 10), 60);
         $value = $this->cache->rememberProtected('foo', static function () : void {
             throw new \LogicException('Must not recompute a free item early');
         }, 60);
@@ -268,7 +269,7 @@ final class StampedeTest extends TestCase
         foreach (['nonsense', 'a|b', '', '5'] as $index => $metadata) {
             $key = 'foo' . $index;
             $this->cache->set($key, 'stored', 60);
-            $this->cache->set('stampede.' . $key, $metadata, 60);
+            $this->cache->set(Cache::RESERVED_PREFIX . 'stampede:' . $key, $metadata, 60);
             $value = $this->cache->rememberProtected($key, static function () : void {
                 throw new \LogicException('Must not recompute on malformed metadata');
             }, 60, 100000.0);
@@ -286,10 +287,10 @@ final class StampedeTest extends TestCase
     public function testMetadataIsDroppedWhenTheValueBecomesNull() : void
     {
         $this->cache->rememberProtected('foo', static fn () => 'computed', 60);
-        self::assertIsString($this->cache->get('stampede.foo'));
+        self::assertIsString($this->cache->get(Cache::RESERVED_PREFIX . 'stampede:foo'));
         $this->cache->delete('foo');
         self::assertNull($this->cache->rememberProtected('foo', static fn () => null, 60));
-        self::assertNull($this->cache->get('stampede.foo'));
+        self::assertNull($this->cache->get(Cache::RESERVED_PREFIX . 'stampede:foo'));
     }
 
     public function testTaggedRememberProtected() : void
