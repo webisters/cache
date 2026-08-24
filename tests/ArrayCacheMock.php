@@ -29,9 +29,29 @@ class ArrayCacheMock extends Cache
      * Number of set calls, used to assert write overhead.
      */
     public int $setCount = 0;
+    /**
+     * Number of get calls per item name.
+     *
+     * @var array<string,int>
+     */
+    protected array $getCounts = [];
+    /**
+     * Callbacks to run on the nth get of an item name, used to simulate
+     * another worker acting concurrently.
+     *
+     * @var array<string,array{0:int,1:callable}>
+     */
+    protected array $getHooks = [];
 
     public function get(string $key) : mixed
     {
+        $this->getCounts[$key] = ($this->getCounts[$key] ?? 0) + 1;
+        if (isset($this->getHooks[$key])
+            && $this->getHooks[$key][0] === $this->getCounts[$key]
+        ) {
+            $hook = $this->getHooks[$key][1];
+            $hook($this);
+        }
         $key = $this->renderKey($key);
         if (!isset($this->storage[$key])) {
             return null;
@@ -41,6 +61,18 @@ class ArrayCacheMock extends Cache
             return null;
         }
         return $this->storage[$key]['value'];
+    }
+
+    /**
+     * Run a callback right before the nth get of an item name resolves.
+     *
+     * @param string $key The item name to watch
+     * @param int $nth Which get call fires the callback, counting from 1
+     * @param callable $callback Receives this instance
+     */
+    public function onGet(string $key, int $nth, callable $callback) : void
+    {
+        $this->getHooks[$key] = [$nth, $callback];
     }
 
     public function set(string $key, mixed $value, ?int $ttl = null) : bool

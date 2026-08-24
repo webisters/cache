@@ -57,6 +57,27 @@ abstract class Cache
      * @var int
      */
     protected int $defaultTtl = 60;
+    /**
+     * The Time To Live of the locks acquired by the lock method, in seconds.
+     *
+     * Caps how long a worker that died mid-computation can hold others back.
+     *
+     * @var int
+     */
+    protected int $lockTtl = 30;
+    /**
+     * How long to wait for the lock holder to publish a value, in seconds.
+     *
+     * @var float
+     */
+    protected float $lockWait = 5.0;
+    /**
+     * How long to sleep between the reads made while waiting for the lock
+     * holder to publish a value, in microseconds.
+     *
+     * @var int
+     */
+    protected int $lockSleep = 50000;
     protected CacheCollector $debugCollector;
     protected bool $autoClose = true;
 
@@ -294,6 +315,216 @@ abstract class Cache
     abstract public function flush() : bool;
 
     /**
+     * Sets one item to the cache storage only if it is not there yet.
+     *
+     * The check and the write are one atomic operation on every driver that
+     * offers the primitive, which makes this usable as a mutual exclusion
+     * building block. The Cache base implementation is a non-atomic get then
+     * set fallback, kept for custom drivers that cannot do better.
+     *
+     * @since 4.2
+     *
+     * @param string $key The item name
+     * @param mixed $value The item value
+     * @param int|null $ttl The Time To Live for the item or null to use the default
+     *
+     * @return bool TRUE if the item was set, FALSE if it already existed or
+     * failed to be set
+     */
+    public function add(string $key, mixed $value, ?int $ttl = null) : bool
+    {
+        if ($this->get($key) !== null) {
+            return false;
+        }
+        return $this->set($key, $value, $ttl);
+    }
+
+    /**
+     * Get the Time To Live of the locks in seconds.
+     *
+     * @since 4.2
+     *
+     * @return int
+     */
+    public function getLockTtl() : int
+    {
+        return $this->lockTtl;
+    }
+
+    /**
+     * Set the Time To Live of the locks in seconds.
+     *
+     * This caps how long a worker that died while computing a value can hold
+     * the other workers back.
+     *
+     * @since 4.2
+     *
+     * @param int $seconds An integer greater than zero
+     *
+     * @throws InvalidArgumentException if $seconds is lower than 1
+     *
+     * @return static
+     */
+    public function setLockTtl(int $seconds) : static
+    {
+        if ($seconds < 1) {
+            throw new InvalidArgumentException(
+                'Lock TTL must be greater than 0. ' . $seconds . ' given'
+            );
+        }
+        $this->lockTtl = $seconds;
+        return $this;
+    }
+
+    /**
+     * Get how long a worker waits for the lock holder to publish a value, in
+     * seconds.
+     *
+     * @since 4.2
+     *
+     * @return float
+     */
+    public function getLockWait() : float
+    {
+        return $this->lockWait;
+    }
+
+    /**
+     * Set how long a worker waits for the lock holder to publish a value, in
+     * seconds.
+     *
+     * When the wait runs out the worker computes the value itself instead of
+     * stalling any longer.
+     *
+     * @since 4.2
+     *
+     * @param float $seconds A number greater than zero
+     *
+     * @throws InvalidArgumentException if $seconds is not greater than zero
+     *
+     * @return static
+     */
+    public function setLockWait(float $seconds) : static
+    {
+        if ($seconds <= 0) {
+            throw new InvalidArgumentException(
+                'Lock wait must be greater than 0. ' . $seconds . ' given'
+            );
+        }
+        $this->lockWait = $seconds;
+        return $this;
+    }
+
+    /**
+     * Get how long a waiting worker sleeps between reads, in microseconds.
+     *
+     * @since 4.2
+     *
+     * @return int
+     */
+    public function getLockSleep() : int
+    {
+        return $this->lockSleep;
+    }
+
+    /**
+     * Set how long a waiting worker sleeps between reads, in microseconds.
+     *
+     * @since 4.2
+     *
+     * @param int $microseconds An integer greater than zero
+     *
+     * @throws InvalidArgumentException if $microseconds is lower than 1
+     *
+     * @return static
+     */
+    public function setLockSleep(int $microseconds) : static
+    {
+        if ($microseconds < 1) {
+            throw new InvalidArgumentException(
+                'Lock sleep must be greater than 0. ' . $microseconds . ' given'
+            );
+        }
+        $this->lockSleep = $microseconds;
+        return $this;
+    }
+
+    /**
+     * Try to acquire an exclusive lock over an item name.
+     *
+     * The lock is advisory: it only blocks the workers that ask for it. It
+     * expires on its own, so a worker that dies while holding it cannot block
+     * the others forever.
+     *
+     * ```php
+     * if ($cache->lock('report')) {
+     *     try {
+     *         // only one worker at a time gets here
+     *     } finally {
+     *         $cache->unlock('report');
+     *     }
+     * }
+     * ```
+     *
+     * @since 4.2
+     *
+     * @param string $key The item name to lock
+     * @param int|null $ttl The lock Time To Live or null to use the default
+     *
+     * @return bool TRUE if the lock was acquired, FALSE if it is held elsewhere
+     */
+    public function lock(string $key, ?int $ttl = null) : bool
+    {
+        return $this->add(
+            $this->renderLockKey($key),
+            1,
+            $ttl ?? $this->getLockTtl()
+        );
+    }
+
+    /**
+     * Release a lock acquired with the lock method.
+     *
+     * @since 4.2
+     *
+     * @param string $key The item name to unlock
+     *
+     * @return bool TRUE if the lock was released, otherwise FALSE
+     */
+    public function unlock(string $key) : bool
+    {
+        return $this->delete($this->renderLockKey($key));
+    }
+
+    /**
+     * Make the storage key of the lock over an item name.
+     *
+     * @since 4.2
+     *
+     * @param string $key The item name
+     *
+     * @return string
+     */
+    protected function renderLockKey(string $key) : string
+    {
+        return 'lock.' . $key;
+    }
+
+    /**
+     * Make the storage key of the recomputation metadata of an item.
+     *
+     * @since 4.2
+     *
+     * @param string $key The item name
+     *
+     * @return string
+     */
+    protected function renderStampedeKey(string $key) : string
+    {
+        return 'stampede.' . $key;
+    }
+
+    /**
      * Gets one item from the cache storage, computing and storing it when it
      * is not there yet.
      *
@@ -351,6 +582,182 @@ abstract class Cache
     public function getOrSet(string $key, callable $callback, ?int $ttl = null) : mixed
     {
         return $this->remember($key, $callback, $ttl);
+    }
+
+    /**
+     * Gets one item from the cache storage, computing and storing it when it
+     * is not there yet, guarded against cache stampede.
+     *
+     * Same contract as the remember method, but when an expensive item expires
+     * under load it is recomputed once instead of once per concurrent request.
+     * Two mechanisms cooperate:
+     *
+     * - **Early recompute.** Each write records how long the computation took.
+     *   As the expiry approaches, a request is picked at random to refresh the
+     *   item ahead of time, with a probability that grows the closer expiry
+     *   gets and the more expensive the item was. Everyone else keeps reading
+     *   the value that is still valid, so nobody waits.
+     * - **Locking.** When the item is really gone, the first worker to take
+     *   the lock computes it while the others wait for the result. A worker
+     *   that waits longer than the lock wait computes the value itself rather
+     *   than stalling, and the lock expires on its own, so a worker that dies
+     *   mid-computation cannot block the rest.
+     *
+     * ```php
+     * $report = $cache->rememberProtected('report', function () {
+     *     return $this->buildExpensiveReport();
+     * }, 300);
+     * ```
+     *
+     * Items are stored exactly as the remember method stores them, so a plain
+     * get reads them back and a plain set overwrites them. Only the bookkeeping
+     * lives in companion keys.
+     *
+     * @since 4.2
+     *
+     * @param string $key The item name
+     * @param callable $callback Called to compute the item value. Receives the
+     * item name as its only argument
+     * @param int|null $ttl The Time To Live for the item or null to use the default
+     * @param float $beta How eagerly to recompute ahead of the expiry. Zero
+     * disables early recompute and leaves only the locking, 1.0 is a sane
+     * default, higher values recompute earlier
+     *
+     * @throws InvalidArgumentException if $beta is negative
+     *
+     * @return mixed The cached value, or the value returned by the callback
+     */
+    public function rememberProtected(
+        string $key,
+        callable $callback,
+        ?int $ttl = null,
+        float $beta = 1.0
+    ) : mixed {
+        if ($beta < 0) {
+            throw new InvalidArgumentException(
+                'Beta must not be negative. ' . $beta . ' given'
+            );
+        }
+        $ttl = $this->makeTtl($ttl);
+        $value = $this->get($key);
+        $isMiss = $value === null;
+        if (!$isMiss && !$this->shouldRecomputeEarly($key, $beta)) {
+            return $value;
+        }
+        if ($this->lock($key)) {
+            try {
+                if ($isMiss) {
+                    // Another worker may have stored it between the read above
+                    // and the lock being taken.
+                    $fresh = $this->get($key);
+                    if ($fresh !== null) {
+                        return $fresh;
+                    }
+                }
+                return $this->computeAndStore($key, $callback, $ttl);
+            } finally {
+                $this->unlock($key);
+            }
+        }
+        if (!$isMiss) {
+            // Someone else is refreshing it early. The value is still valid,
+            // so serve it instead of waiting.
+            return $value;
+        }
+        $value = $this->waitForValue($key);
+        if ($value !== null) {
+            return $value;
+        }
+        // The lock holder never published a value. Compute it rather than
+        // making the caller wait any longer.
+        return $this->computeAndStore($key, $callback, $ttl);
+    }
+
+    /**
+     * Compute an item value, store it, and record what it cost to compute.
+     *
+     * @since 4.2
+     *
+     * @param string $key The item name
+     * @param callable $callback Called to compute the item value
+     * @param int $ttl The Time To Live for the item
+     *
+     * @return mixed The value returned by the callback
+     */
+    protected function computeAndStore(string $key, callable $callback, int $ttl) : mixed
+    {
+        $start = \microtime(true);
+        $value = $callback($key);
+        if ($value === null) {
+            $this->delete($this->renderStampedeKey($key));
+            return null;
+        }
+        $delta = \microtime(true) - $start;
+        $this->set($key, $value, $ttl);
+        $this->set(
+            $this->renderStampedeKey($key),
+            $delta . '|' . (\time() + $ttl),
+            $ttl
+        );
+        return $value;
+    }
+
+    /**
+     * Decide whether an item that is still valid should be recomputed now.
+     *
+     * Implements probabilistic early expiration: the deadline of an item is
+     * moved backwards by a random amount proportional to what the item cost to
+     * compute, so an expensive item is refreshed earlier, and only one of the
+     * concurrent readers is likely to be picked.
+     *
+     * @since 4.2
+     *
+     * @param string $key The item name
+     * @param float $beta How eagerly to recompute. Zero never recomputes early
+     *
+     * @return bool TRUE to recompute the item now, otherwise FALSE
+     */
+    protected function shouldRecomputeEarly(string $key, float $beta) : bool
+    {
+        if ($beta <= 0.0) {
+            return false;
+        }
+        $metadata = $this->get($this->renderStampedeKey($key));
+        if (!\is_string($metadata) || !\str_contains($metadata, '|')) {
+            return false;
+        }
+        [$delta, $expires] = \explode('|', $metadata, 2);
+        if (!\is_numeric($delta) || !\is_numeric($expires)) {
+            return false;
+        }
+        $delta = (float) $delta;
+        if ($delta <= 0.0) {
+            return false;
+        }
+        $random = \mt_rand(1, \mt_getrandmax()) / \mt_getrandmax();
+        return \microtime(true) - ($delta * $beta * \log($random)) >= (float) $expires;
+    }
+
+    /**
+     * Wait for the worker holding the lock over an item to publish its value.
+     *
+     * @since 4.2
+     *
+     * @param string $key The item name
+     *
+     * @return mixed The value that showed up, or null if the wait ran out
+     */
+    protected function waitForValue(string $key) : mixed
+    {
+        $deadline = \microtime(true) + $this->getLockWait();
+        while (\microtime(true) < $deadline) {
+            \usleep($this->getLockSleep());
+            $value = $this->get($key);
+            if ($value !== null) {
+                return $value;
+            }
+        }
+        return null;
     }
 
     /**

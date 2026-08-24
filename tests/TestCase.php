@@ -142,6 +142,92 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         );
     }
 
+    public function testAdd() : void
+    {
+        self::assertTrue($this->cache->add('foo', 'first', 60));
+        self::assertFalse($this->cache->add('foo', 'second', 60));
+        self::assertSame('first', $this->cache->get('foo'));
+        self::assertTrue($this->cache->delete('foo'));
+        self::assertTrue($this->cache->add('foo', 'third', 60));
+        self::assertSame('third', $this->cache->get('foo'));
+    }
+
+    public function testAddAfterExpiration() : void
+    {
+        self::assertTrue($this->cache->add('foo', 'first', 1));
+        self::assertFalse($this->cache->add('foo', 'second', 1));
+        \sleep(2);
+        self::assertTrue($this->cache->add('foo', 'third', 60));
+        self::assertSame('third', $this->cache->get('foo'));
+    }
+
+    public function testLockAndUnlock() : void
+    {
+        self::assertTrue($this->cache->lock('report'));
+        self::assertFalse($this->cache->lock('report'));
+        self::assertTrue($this->cache->unlock('report'));
+        self::assertTrue($this->cache->lock('report'));
+    }
+
+    public function testLockDoesNotTouchTheItem() : void
+    {
+        self::assertTrue($this->cache->set('report', 'value', 60));
+        self::assertTrue($this->cache->lock('report'));
+        self::assertSame('value', $this->cache->get('report'));
+    }
+
+    public function testRememberProtected() : void
+    {
+        $calls = 0;
+        $callback = static function () use (&$calls) {
+            $calls++;
+            return 'computed';
+        };
+        self::assertNull($this->cache->get('foo'));
+        self::assertSame('computed', $this->cache->rememberProtected('foo', $callback, 60));
+        self::assertSame('computed', $this->cache->rememberProtected('foo', $callback, 60));
+        self::assertSame(1, $calls);
+        self::assertSame('computed', $this->cache->get('foo'));
+        // The lock was released once the computation was done.
+        self::assertTrue($this->cache->lock('foo'));
+    }
+
+    public function testRememberProtectedDoesNotStoreNull() : void
+    {
+        $calls = 0;
+        $callback = static function () use (&$calls) {
+            $calls++;
+            return null;
+        };
+        self::assertNull($this->cache->rememberProtected('foo', $callback, 60));
+        self::assertNull($this->cache->rememberProtected('foo', $callback, 60));
+        self::assertSame(2, $calls);
+    }
+
+    public function testTaggedRememberProtected() : void
+    {
+        $calls = 0;
+        $callback = static function () use (&$calls) {
+            $calls++;
+            return 'computed';
+        };
+        self::assertSame(
+            'computed',
+            $this->cache->tags('posts')->rememberProtected('list', $callback, 60)
+        );
+        self::assertSame(
+            'computed',
+            $this->cache->tags('posts')->rememberProtected('list', $callback, 60)
+        );
+        self::assertSame(1, $calls);
+        self::assertTrue($this->cache->tags('posts')->flush());
+        self::assertSame(
+            'computed',
+            $this->cache->tags('posts')->rememberProtected('list', $callback, 60)
+        );
+        self::assertSame(2, $calls);
+    }
+
     public function testRemember() : void
     {
         $calls = 0;

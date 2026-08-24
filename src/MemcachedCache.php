@@ -146,6 +146,22 @@ class MemcachedCache extends Cache
         return $this->memcached->set($this->renderKey($key), $value, $this->makeTtl($ttl));
     }
 
+    #[Override]
+    public function add(string $key, mixed $value, ?int $ttl = null) : bool
+    {
+        if (isset($this->debugCollector)) {
+            $start = \microtime(true);
+            return $this->addDebugSet(
+                $key,
+                $ttl,
+                $start,
+                $value,
+                $this->memcached->add($this->renderKey($key), $value, $this->makeTtl($ttl))
+            );
+        }
+        return $this->memcached->add($this->renderKey($key), $value, $this->makeTtl($ttl));
+    }
+
     public function delete(string $key) : bool
     {
         if (isset($this->debugCollector)) {

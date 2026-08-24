@@ -71,6 +71,29 @@ class ApcuCache extends Cache
         );
     }
 
+    public function add(string $key, mixed $value, ?int $ttl = null) : bool
+    {
+        if (isset($this->debugCollector)) {
+            $start = \microtime(true);
+            return $this->addDebugSet(
+                $key,
+                $ttl,
+                $start,
+                $value,
+                \apcu_add(
+                    $this->renderKey($key),
+                    $this->serialize($value),
+                    $this->makeTtl($ttl)
+                )
+            );
+        }
+        return \apcu_add(
+            $this->renderKey($key),
+            $this->serialize($value),
+            $this->makeTtl($ttl)
+        );
+    }
+
     public function delete(string $key) : bool
     {
         if (isset($this->debugCollector)) {

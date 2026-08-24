@@ -303,6 +303,42 @@ class TaggedCache
     }
 
     /**
+     * Gets one tagged item from the cache storage, computing and storing it
+     * when it is not there yet, guarded against cache stampede.
+     *
+     * Same contract as the remember method, with the protection described in
+     * the Cache rememberProtected method. An invalidated tag counts as a miss,
+     * so the workers that pile up right after a tag is flushed recompute the
+     * item once between them instead of once each.
+     *
+     * @param string $key The item name
+     * @param callable $callback Called to compute the item value. Receives the
+     * item name as its only argument
+     * @param int|null $ttl The Time To Live for the item or null to use the default
+     * @param float $beta How eagerly to recompute ahead of the expiry. Zero
+     * disables early recompute and leaves only the locking
+     *
+     * @throws InvalidArgumentException if $beta is negative
+     *
+     * @return mixed The cached value, or the value returned by the callback
+     */
+    public function rememberProtected(
+        string $key,
+        callable $callback,
+        ?int $ttl = null,
+        float $beta = 1.0
+    ) : mixed {
+        return $this->cache->rememberProtected(
+            $this->renderKey($key, true),
+            static function () use ($callback, $key) {
+                return $callback($key);
+            },
+            $ttl,
+            $beta
+        );
+    }
+
+    /**
      * Invalidates every item stored under this instance tags.
      *
      * Items tagged with any of the tags become unreachable at once. Items that

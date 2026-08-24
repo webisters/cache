@@ -151,6 +151,31 @@ class RedisCache extends Cache
         );
     }
 
+    #[Override]
+    public function add(string $key, mixed $value, ?int $ttl = null) : bool
+    {
+        if (isset($this->debugCollector)) {
+            $start = \microtime(true);
+            return $this->addDebugSet(
+                $key,
+                $ttl,
+                $start,
+                $value,
+                $this->addValue($key, $value, $ttl)
+            );
+        }
+        return $this->addValue($key, $value, $ttl);
+    }
+
+    protected function addValue(string $key, mixed $value, ?int $ttl = null) : bool
+    {
+        return (bool) $this->redis->set(
+            $this->renderKey($key),
+            $this->serialize($value),
+            ['nx', 'ex' => $this->makeTtl($ttl)]
+        );
+    }
+
     public function delete(string $key) : bool
     {
         if (isset($this->debugCollector)) {
