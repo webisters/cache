@@ -24,6 +24,20 @@ use SensitiveParameter;
 class FilesCache extends Cache
 {
     /**
+     * Name prefix of the temporary files items are written to before being
+     * moved into place.
+     *
+     * @since 4.2
+     */
+    protected const TEMPORARY_PREFIX = 'tmp-';
+    /**
+     * How long a temporary file is left alone before the garbage collector
+     * treats it as abandoned, in seconds.
+     *
+     * @since 4.2
+     */
+    protected const TEMPORARY_GRACE = 60;
+    /**
      * Files Cache handler configurations.
      *
      * @var array<string,mixed>
@@ -267,21 +281,64 @@ class FilesCache extends Cache
     {
         $filepath = $this->renderFilepath($key);
         $this->createSubDirectory($filepath);
-        $value = [
+        $contents = $this->serialize([
             'ttl' => \time() + $this->makeTtl($ttl),
             'data' => $value,
-        ];
-        $value = $this->serialize($value);
-        $isFile = \is_file($filepath);
-        $written = @\file_put_contents($filepath, $value, \LOCK_EX);
-        if ($written !== false && $isFile === false) {
-            \chmod($filepath, $this->configs['files_permission']);
+        ]);
+        $temporary = $this->writeTemporaryFile($filepath, $contents);
+        if ($temporary === false) {
+            return false;
         }
-        if ($written === false) {
+        // Renaming over the destination swaps it in one step, so a reader sees
+        // either the whole previous item or the whole new one, never the
+        // half-written file that writing in place would leave behind.
+        if (!@\rename($temporary, $filepath)) {
+            @\unlink($temporary);
             $this->log("Cache (files): File '{$filepath}' could not be written");
             return false;
         }
         return true;
+    }
+
+    /**
+     * Write the contents of an item to a temporary file, ready to be moved
+     * into place.
+     *
+     * The temporary file is made in the directory the item belongs to, so the
+     * move that follows stays on one file system and is a rename rather than a
+     * copy.
+     *
+     * @since 4.2
+     *
+     * @param string $filepath The final path of the item
+     * @param string $contents The serialized item
+     *
+     * @return false|string The temporary file path, or false on failure
+     */
+    protected function writeTemporaryFile(string $filepath, string $contents) : false | string
+    {
+        $directory = \dirname($filepath);
+        $temporary = @\tempnam($directory, static::TEMPORARY_PREFIX);
+        if ($temporary === false) {
+            $this->log("Cache (files): Temporary file could not be created in '{$directory}'");
+            return false;
+        }
+        // tempnam quietly falls back to the system temp directory when it
+        // cannot write in the one it was given. Moving a file from there would
+        // cross file systems, turning the rename that follows into a copy and
+        // losing the atomicity this is all for.
+        if (\realpath(\dirname($temporary)) !== \realpath($directory)) {
+            @\unlink($temporary);
+            $this->log("Cache (files): Temporary file could not be created in '{$directory}'");
+            return false;
+        }
+        if (@\file_put_contents($temporary, $contents) === false) {
+            @\unlink($temporary);
+            $this->log("Cache (files): Temporary file '{$temporary}' could not be written");
+            return false;
+        }
+        @\chmod($temporary, $this->configs['files_permission']);
+        return $temporary;
     }
 
     #[Override]
@@ -323,22 +380,39 @@ class FilesCache extends Cache
         if ($this->isExpiredFile($filepath)) {
             $this->deleteFile($filepath);
         }
-        $handle = @\fopen($filepath, 'xb');
-        if ($handle === false) {
-            return false;
-        }
         $contents = $this->serialize([
             'ttl' => \time() + $this->makeTtl($ttl),
             'data' => $value,
         ]);
-        $written = \fwrite($handle, $contents);
+        $temporary = $this->writeTemporaryFile($filepath, $contents);
+        if ($temporary === false) {
+            return false;
+        }
+        // Hard linking the finished file into place refuses to overwrite, so
+        // it claims the name and publishes the contents in the same step. The
+        // loser of a race sees a complete item, never an empty placeholder.
+        if (@\link($temporary, $filepath)) {
+            @\unlink($temporary);
+            return true;
+        }
+        if (\is_file($filepath)) {
+            @\unlink($temporary);
+            return false;
+        }
+        // The file system has no hard links. Claim the name with an exclusive
+        // create and move the finished file over the placeholder.
+        $handle = @\fopen($filepath, 'xb');
+        if ($handle === false) {
+            @\unlink($temporary);
+            return false;
+        }
         \fclose($handle);
-        if ($written === false) {
+        if (!@\rename($temporary, $filepath)) {
+            @\unlink($temporary);
             $this->deleteFile($filepath);
             $this->log("Cache (files): File '{$filepath}' could not be written");
             return false;
         }
-        \chmod($filepath, $this->configs['files_permission']);
         return true;
     }
 
@@ -410,13 +484,15 @@ class FilesCache extends Cache
         }
         $baseDirectory = \rtrim($baseDirectory, \DIRECTORY_SEPARATOR) . \DIRECTORY_SEPARATOR;
         $status = true;
-        while (($path = \readdir($handle)) !== false) {
-            if ($path[0] === '.') {
+        while (($filename = \readdir($handle)) !== false) {
+            if ($filename[0] === '.') {
                 continue;
             }
-            $path = $baseDirectory . $path;
+            $path = $baseDirectory . $filename;
             if (\is_file($path)) {
-                $this->getContents($path);
+                \str_starts_with($filename, static::TEMPORARY_PREFIX)
+                    ? $this->deleteAbandonedTemporaryFile($path)
+                    : $this->getContents($path);
                 continue;
             }
             if (!$this->deleteExpired($path)) {
@@ -430,6 +506,25 @@ class FilesCache extends Cache
         }
         $this->closeDir($handle);
         return $status;
+    }
+
+    /**
+     * Delete a temporary file left behind by a write that never finished.
+     *
+     * A temporary file that is still fresh may belong to a write happening
+     * right now, and taking it away would fail that write, so only the ones
+     * old enough to be abandoned are removed.
+     *
+     * @since 4.2
+     *
+     * @param string $filepath
+     */
+    protected function deleteAbandonedTemporaryFile(string $filepath) : void
+    {
+        $time = @\filemtime($filepath);
+        if ($time !== false && $time <= \time() - static::TEMPORARY_GRACE) {
+            $this->deleteFile($filepath);
+        }
     }
 
     protected function deleteAll(string $baseDirectory) : bool

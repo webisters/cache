@@ -106,6 +106,56 @@ class FilesCacheTest extends TestCase
         self::assertNull($cache->get('foo'));
     }
 
+    public function testOverwritingLeavesNoTemporaryFilesBehind() : void
+    {
+        for ($i = 0; $i < 5; $i++) {
+            self::assertTrue($this->cache->set('foo', 'value-' . $i, 60));
+        }
+        self::assertTrue($this->cache->add('bar', 'added', 60));
+        self::assertSame('value-4', $this->cache->get('foo'));
+        self::assertSame('added', $this->cache->get('bar'));
+        self::assertSame([], $this->findTemporaryFiles());
+    }
+
+    public function testGarbageCollectorSparesTemporaryFilesInFlight() : void
+    {
+        self::assertTrue($this->cache->set('foo', 'bar', 60));
+        $directory = $this->configs['directory'] . $this->prefix
+            . \DIRECTORY_SEPARATOR . 'zz';
+        \mkdir($directory, 0777, true);
+        $fresh = $directory . \DIRECTORY_SEPARATOR . 'tmp-fresh';
+        $abandoned = $directory . \DIRECTORY_SEPARATOR . 'tmp-abandoned';
+        \file_put_contents($fresh, 'half written');
+        \file_put_contents($abandoned, 'half written');
+        \touch($abandoned, \time() - 3600);
+        self::assertTrue($this->cache->gc()); // @phpstan-ignore-line
+        // A temporary file that is still fresh may belong to a write happening
+        // right now, so only the abandoned one is collected.
+        self::assertFileExists($fresh);
+        self::assertFileDoesNotExist($abandoned);
+        self::assertSame('bar', $this->cache->get('foo'));
+    }
+
+    /**
+     * @return array<int,string>
+     */
+    protected function findTemporaryFiles() : array
+    {
+        $found = [];
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator(
+                $this->configs['directory'],
+                \FilesystemIterator::SKIP_DOTS
+            )
+        );
+        foreach ($iterator as $file) {
+            if ($file->isFile() && \str_starts_with($file->getFilename(), 'tmp-')) {
+                $found[] = $file->getFilename();
+            }
+        }
+        return $found;
+    }
+
     public function testDefaultDirectoryIsPrivateToTheUser() : void
     {
         if (\DIRECTORY_SEPARATOR !== '/') {
@@ -160,15 +210,40 @@ class FilesCacheTest extends TestCase
             $this->markTestIncomplete();
         }
         self::assertTrue($this->cache->set('key', 'value'));
-        $key = \md5('key');
-        $subdir = $key[0] . $key[1] . '/';
-        $prefix = '';
-        if ($this->prefix !== '') {
-            $prefix = $this->prefix . '/';
+        // An item is written to a temporary file and renamed into place, so a
+        // write fails when the directory will not take a new file. Making the
+        // item's own file read only no longer stops it, see
+        // testReadOnlyItemFileIsStillReplaceable.
+        $directory = $this->renderItemDirectory('key');
+        \exec('chmod 500 ' . $directory);
+        try {
+            self::assertFalse($this->cache->set('key', 'value'));
+        } finally {
+            \exec('chmod 755 ' . $directory);
         }
-        $dir = $this->configs['directory'] . $prefix;
-        \exec('chmod 444 ' . $dir . $subdir . '*');
-        self::assertFalse($this->cache->set('key', 'value'));
+    }
+
+    public function testReadOnlyItemFileIsStillReplaceable() : void
+    {
+        if (\getenv('GITLAB_CI')) {
+            $this->markTestIncomplete();
+        }
+        self::assertTrue($this->cache->set('key', 'value'));
+        \exec('chmod 444 ' . $this->renderItemDirectory('key') . '/*');
+        // Renaming over a file needs write permission on the directory, not on
+        // the file, so a read only item no longer wedges its key for good.
+        self::assertTrue($this->cache->set('key', 'new value'));
+        self::assertSame('new value', $this->cache->get('key'));
+    }
+
+    /**
+     * Path of the directory holding an item, as renderFilepath lays it out.
+     */
+    protected function renderItemDirectory(string $key) : string
+    {
+        $hash = \md5($key);
+        $prefix = $this->prefix === '' ? '' : $this->prefix . '/';
+        return $this->configs['directory'] . $prefix . $hash[0] . $hash[1];
     }
 
     public function testGetFailure() : void
