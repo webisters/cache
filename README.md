@@ -32,6 +32,52 @@ the calling code having to change.
 - **Pluggable serialization**: PHP `serialize`, igbinary, JSON, JSON as arrays, or msgpack.
 - **Debug collector** integration for the Webisters debug toolbar.
 
+## Maintenance
+
+`FilesCache` and `DatabaseCache` skip expired items on read but leave them where they are, so a
+read never turns into a write. Nothing reclaims that space on its own, and a cache with many
+short-lived keys keeps growing.
+
+`purge()` removes them and reports how many went, which is what a scheduled job wants:
+
+```php
+$removed = $cache->purge();
+```
+
+By default each instance also collects on destruction, with a probability set by the `gc` config
+(`1` means one request in a hundred pays for it). Running a cron job instead lets requests skip
+that work entirely; set `gc` to `0` to turn the inline collection off.
+
+```php
+// config/cache.php
+'default' => [
+    'class' => Framework\Cache\FilesCache::class,
+    'configs' => [
+        'directory' => STORAGE_DIR . 'cache',
+        'gc' => 0, // collected by the cron job below
+    ],
+],
+```
+
+```php
+#!/usr/bin/env php
+<?php // bin/cache-purge
+require __DIR__ . '/../vendor/autoload.php';
+
+$cache = new Framework\Cache\FilesCache(['directory' => __DIR__ . '/../storage/cache', 'gc' => 0]);
+echo $cache->purge(), ' expired items removed', \PHP_EOL;
+```
+
+```cron
+*/15 * * * * /usr/bin/php /srv/app/bin/cache-purge >> /var/log/cache-purge.log 2>&1
+```
+
+How often to run it depends on how fast keys expire and how much space is spare. Every fifteen
+minutes suits most applications; a cache holding large items with short TTLs wants it more often.
+
+`ArrayCache` also has `purge()`, though it only gives memory back on a long-running process, and
+the APCu, Redis and Memcached servers evict expired items themselves, so they need none of this.
+
 ## Installation
 ```bash
 composer require webisters/cache

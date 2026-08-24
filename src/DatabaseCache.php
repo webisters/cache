@@ -455,17 +455,49 @@ class DatabaseCache extends Cache
      */
     public function gc() : bool
     {
+        return $this->deleteExpired() !== null;
+    }
+
+    /**
+     * Delete every expired row and report how many went.
+     *
+     * Expired rows are skipped on read but stay in the table until something
+     * removes them, so a cache with a lot of short lived keys keeps the table
+     * growing. This is the maintenance entry point for a scheduled job, its
+     * count being something a cron job can log or alert on:
+     *
+     * ```php
+     * $removed = $cache->purge();
+     * ```
+     *
+     * Set the `gc` config to 0 to leave collection entirely to that job,
+     * rather than paying for it on a share of the requests.
+     *
+     * @since 4.2
+     *
+     * @return int Number of rows removed, or zero when the deletion failed,
+     * in which case the reason is logged
+     */
+    public function purge() : int
+    {
+        return $this->deleteExpired() ?? 0;
+    }
+
+    /**
+     * @return int|null Number of rows removed, or null when the deletion failed
+     */
+    protected function deleteExpired() : ?int
+    {
         if (!isset($this->database)) {
-            return false;
+            return null;
         }
         $statement = 'DELETE FROM ' . $this->protect($this->getTable())
             . ' WHERE ' . $this->protect($this->getColumn('ttl')) . ' <= ?';
         try {
-            $this->database->prepare($statement)->exec(\time());
-            return true;
+            return (int) $this->database->prepare($statement)->exec(\time());
         } catch (mysqli_sql_exception $exception) {
             $this->log('Cache (database): ' . $exception->getMessage());
-            return false;
+            return null;
         }
     }
 

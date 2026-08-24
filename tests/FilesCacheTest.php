@@ -62,10 +62,53 @@ class FilesCacheTest extends TestCase
 
     public function testInvalidGCValue() : void
     {
-        $this->configs['gc'] = 0;
+        $this->configs['gc'] = -1;
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Invalid cache GC: 0');
+        $this->expectExceptionMessage('Invalid cache GC: -1');
         new FilesCache($this->configs, $this->prefix, $this->serializer);
+    }
+
+    public function testGCValueAboveOneHundredIsRejected() : void
+    {
+        $this->configs['gc'] = 101;
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid cache GC: 101');
+        new FilesCache($this->configs, $this->prefix, $this->serializer);
+    }
+
+    public function testGCCanBeTurnedOff() : void
+    {
+        // Zero is for setups running purge from a scheduled job instead.
+        $this->configs['gc'] = 0;
+        $cache = new FilesCache($this->configs, $this->prefix, $this->serializer);
+        self::assertTrue($cache->set('foo', 'bar', 60));
+        self::assertSame('bar', $cache->get('foo'));
+    }
+
+    public function testPurgeReportsWhatItRemoved() : void
+    {
+        self::assertTrue($this->cache->set('gone', 'x', 1));
+        self::assertTrue($this->cache->set('also-gone', 'y', 1));
+        self::assertTrue($this->cache->set('kept', 'z', 60));
+        \sleep(2);
+        self::assertSame(2, $this->cache->purge()); // @phpstan-ignore-line
+        // Nothing left to remove on a second pass.
+        self::assertSame(0, $this->cache->purge()); // @phpstan-ignore-line
+        self::assertSame('z', $this->cache->get('kept'));
+    }
+
+    public function testPurgeCountsAbandonedTemporaryFiles() : void
+    {
+        self::assertTrue($this->cache->set('kept', 'z', 60));
+        $directory = $this->configs['directory'] . $this->prefix
+            . \DIRECTORY_SEPARATOR . 'zz';
+        \mkdir($directory, 0777, true);
+        $abandoned = $directory . \DIRECTORY_SEPARATOR . 'tmp-abandoned';
+        \file_put_contents($abandoned, 'half written');
+        \touch($abandoned, \time() - 3600);
+        self::assertSame(1, $this->cache->purge()); // @phpstan-ignore-line
+        self::assertFileDoesNotExist($abandoned);
+        self::assertSame('z', $this->cache->get('kept'));
     }
 
     public function testInvalidCacheDirectory() : void
