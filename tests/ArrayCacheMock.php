@@ -22,7 +22,7 @@ use Framework\Cache\Cache;
 class ArrayCacheMock extends Cache
 {
     /**
-     * @var array<string,array{value:mixed,expires:int}>
+     * @var array<string,array{value:mixed,expires:int,ttl:int}>
      */
     protected array $storage = [];
     /**
@@ -49,6 +49,7 @@ class ArrayCacheMock extends Cache
         $this->storage[$this->renderKey($key)] = [
             'value' => $value,
             'expires' => \time() + $this->makeTtl($ttl),
+            'ttl' => $this->makeTtl($ttl),
         ];
         return true;
     }
@@ -71,5 +72,17 @@ class ArrayCacheMock extends Cache
     public function getStoredKeys() : array
     {
         return \array_keys($this->storage);
+    }
+
+    /**
+     * Get the TTL an item was stored with, in seconds.
+     *
+     * @param string $key
+     *
+     * @return int|null The TTL, or null when the item is not stored
+     */
+    public function getTtlOf(string $key) : ?int
+    {
+        return $this->storage[$this->renderKey($key)]['ttl'] ?? null;
     }
 }
