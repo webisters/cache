@@ -71,6 +71,24 @@ class MemcachedCache extends Cache
         $this->connect();
     }
 
+    /**
+     * Accept any serializer, because this driver does not do the work itself.
+     *
+     * Values are handed to Memcached whole and it serializes them, using the
+     * build it was compiled with rather than the extensions loaded here. So the
+     * check the Cache base makes asks the wrong question: igbinary can be
+     * missing from PHP while Memcached still has it, and the reverse. An
+     * unusable choice is reported by connect, which logs what setOptions says.
+     *
+     * @since 4.2
+     *
+     * @param Serializer $serializer
+     */
+    #[Override]
+    protected function assertSerializerAvailable(Serializer $serializer) : void
+    {
+    }
+
     protected function validateConfigs() : void
     {
         foreach ($this->configs['servers'] as $index => $config) {

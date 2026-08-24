@@ -164,8 +164,40 @@ abstract class Cache
         if (\is_string($serializer)) {
             $serializer = Serializer::from($serializer);
         }
+        $this->assertSerializerAvailable($serializer);
         $this->serializer = $serializer;
         return $this;
+    }
+
+    /**
+     * Refuse a serializer this installation cannot use.
+     *
+     * Without this the choice looks fine until the first write, which fails
+     * with an undefined function far from the configuration that caused it.
+     *
+     * Drivers that hand serialization to the storage rather than doing it here
+     * override this, since what they need is not the same thing.
+     *
+     * @since 4.2
+     *
+     * @param Serializer $serializer
+     *
+     * @throws RuntimeException if the serializer needs an extension that is
+     * not loaded
+     */
+    protected function assertSerializerAvailable(Serializer $serializer) : void
+    {
+        if ($serializer->isAvailable()) {
+            return;
+        }
+        throw new RuntimeException(
+            'Serializer ' . $serializer->value . ' needs the '
+            . $serializer->getExtension() . ' extension, which is not loaded. '
+            . 'Available: ' . \implode(
+                ', ',
+                \array_column(Serializer::available(), 'value')
+            )
+        );
     }
 
     public function getSerializer() : Serializer

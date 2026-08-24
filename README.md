@@ -32,6 +32,62 @@ the calling code having to change.
 - **Pluggable serialization**: PHP `serialize`, igbinary, JSON, JSON as arrays, or msgpack.
 - **Debug collector** integration for the Webisters debug toolbar.
 
+## Serialization
+
+Values are turned into bytes on the way into the storage and back on the way out. Which
+serializer does that is the third constructor argument, as an enum case or its name:
+
+```php
+use Framework\Cache\Serializer;
+
+new FilesCache($configs, $prefix, Serializer::IGBINARY);
+new FilesCache($configs, $prefix, 'igbinary');
+```
+
+The default is `Serializer::PHP`.
+
+| Serializer | Needs | Keeps objects | Size and speed | Readable outside PHP |
+| --- | --- | --- | --- | --- |
+| `PHP` | nothing | Yes | Baseline | No |
+| `IGBINARY` | `ext-igbinary` | Yes | Smaller and faster than PHP | No |
+| `MSGPACK` | `ext-msgpack` | Yes | Compact binary | Yes |
+| `JSON` | `ext-json` | No, see below | Text, larger | Yes |
+| `JSON_ARRAY` | `ext-json` | No, see below | Text, larger | Yes |
+
+### What each one gives back
+
+This is the part worth knowing before choosing. Strings, integers, floats, booleans and lists
+come back unchanged from all five. Anything else depends:
+
+| Stored | `PHP`, `IGBINARY`, `MSGPACK` | `JSON` | `JSON_ARRAY` |
+| --- | --- | --- | --- |
+| `['a' => 1]` | `array` | **`stdClass`** | `array` |
+| An object | Its own class | **`stdClass`** | **`array`** |
+
+So the JSON serializers lose the class of an object, and `JSON` also turns an associative array
+into an object. Reach for them when the cached data is plain and something other than PHP may
+read it. Use `PHP`, `IGBINARY` or `MSGPACK` when a value has to come back exactly as it went in.
+
+`PHP` and `IGBINARY` rebuild objects, which means `__wakeup()` and `__unserialize()` run on read.
+Do not point them at a storage something untrusted can write to.
+
+### Checking what is available
+
+`IGBINARY` and `MSGPACK` need extensions that may not be installed:
+
+```php
+Serializer::IGBINARY->isAvailable();  // bool
+Serializer::IGBINARY->getExtension(); // 'igbinary'
+Serializer::available();              // every usable case
+```
+
+Choosing one that is not installed throws at construction, naming the missing extension and the
+ones that would work, rather than failing later on the first write with an undefined function.
+
+`MemcachedCache` is the exception: it hands values to Memcached whole and Memcached serializes
+them with the support it was compiled with, so what PHP has loaded is not the question. An
+unusable choice there is reported through the logger when the connection is set up.
+
 ## Time To Live
 
 Every write takes a TTL in seconds, saying how long the item stays readable.
