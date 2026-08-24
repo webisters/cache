@@ -32,6 +32,189 @@ the calling code having to change.
 - **Pluggable serialization**: PHP `serialize`, igbinary, JSON, JSON as arrays, or msgpack.
 - **Debug collector** integration for the Webisters debug toolbar.
 
+## Usage
+
+Every driver answers the same calls, so the only thing that differs between them is the line that
+builds one. Pick the driver in configuration and the rest of the code never has to know:
+
+```php
+$cache->set('user.1', ['name' => 'Ada'], 300); // true
+$cache->get('user.1');                         // ['name' => 'Ada'], or null on a miss
+$cache->delete('user.1');                      // true
+$cache->increment('hits');                     // 1
+$cache->increment('hits', 5);                  // 6
+$cache->decrement('hits', 2);                  // 4
+```
+
+The constructor is the same shape everywhere too:
+
+```php
+new SomeCache($configs, $prefix, $serializer, $logger);
+```
+
+Only `$configs` is required, and only for the drivers that need somewhere to connect to. `$prefix`
+is what lets several applications share one storage without colliding: it is prepended to every
+key, except on `FilesCache`, where it names a subdirectory instead (see below).
+
+### Files
+
+Items live in a directory. Good default when there is no cache server to hand.
+
+```php
+use Framework\Cache\FilesCache;
+
+$cache = new FilesCache([
+    'directory' => '/var/www/app/storage/cache', // must already exist and be writable
+    'files_permission' => 0644,
+    'gc' => 1, // percent of destructs that collect expired items, 0 to leave it to cron
+]);
+
+$cache->set('user.1', ['name' => 'Ada'], 300);
+$cache->get('user.1');
+$cache->delete('user.1');
+$cache->increment('hits');
+```
+
+Leave `directory` out and it uses a directory of its own inside the system temp directory. See
+[Maintenance](#maintenance) for collecting expired files.
+
+**The prefix works differently here.** On every other driver it is prepended to the key. On this
+one it names a **subdirectory of `directory`**, which must already exist:
+
+```php
+// /var/www/app/storage/cache/app/ has to be there first
+$cache = new FilesCache(['directory' => '/var/www/app/storage/cache'], 'app');
+```
+
+Construction throws `Invalid cache directory path` if it is not, rather than creating it.
+
+### APCu
+
+Shared memory on the machine, so it is the fastest option and the one that goes no further than
+the one server. Needs `ext-apcu`, and `apc.enable_cli=1` to work from the command line.
+
+```php
+use Framework\Cache\ApcuCache;
+
+$cache = new ApcuCache([], 'app-');
+
+$cache->set('user.1', ['name' => 'Ada'], 300);
+$cache->get('user.1');
+$cache->delete('user.1');
+$cache->increment('hits');
+```
+
+### Redis
+
+Shared between servers and survives a restart. Needs `ext-redis`.
+
+```php
+use Framework\Cache\RedisCache;
+
+$cache = new RedisCache([
+    'host' => '127.0.0.1',
+    'port' => 6379,
+    'timeout' => 2.5,
+    'password' => null,
+    'database' => null,
+], 'app-');
+
+$cache->set('user.1', ['name' => 'Ada'], 300);
+$cache->get('user.1');
+$cache->delete('user.1');
+$cache->increment('hits');
+```
+
+An existing `Redis` object can be handed over instead of configs, in which case the connection is
+left open when the cache goes away:
+
+```php
+$cache = new RedisCache($redis, 'app-');
+```
+
+### Memcached
+
+A pool of servers, weighted. Needs `ext-memcached`.
+
+```php
+use Framework\Cache\MemcachedCache;
+
+$cache = new MemcachedCache([
+    'servers' => [
+        ['host' => '10.0.0.1', 'port' => 11211, 'weight' => 2],
+        ['host' => '10.0.0.2', 'port' => 11211, 'weight' => 1],
+    ],
+], 'app-');
+
+$cache->set('user.1', ['name' => 'Ada'], 300);
+$cache->get('user.1');
+$cache->delete('user.1');
+$cache->increment('hits');
+```
+
+Construction fails if no server in the pool answers, naming the ones it tried. As with Redis, an
+existing `Memcached` object can be passed instead.
+
+### Database
+
+A table in MariaDB or MySQL, for a cache that outlives a restart of everything else. Needs
+`webisters/database`, which is a suggestion rather than a requirement, so install it as well.
+
+```php
+use Framework\Cache\DatabaseCache;
+
+$cache = new DatabaseCache([
+    'host' => '127.0.0.1',
+    'port' => 3306,
+    'username' => 'app',
+    'password' => 'secret',
+    'schema' => 'app',
+    'table' => 'Cache',
+], 'app-');
+
+$cache->createTable(); // once, or leave it to a migration
+
+$cache->set('user.1', ['name' => 'Ada'], 300);
+$cache->get('user.1');
+$cache->delete('user.1');
+$cache->increment('hits');
+```
+
+`getMulti()` reads every key in one statement here, which is worth reaching for when the round
+trip is a database query. See [Maintenance](#maintenance) for collecting expired rows.
+
+### Array
+
+A PHP array, so nothing is shared and nothing outlives the request. For tests, and for not
+fetching the same value twice while one request is handled.
+
+```php
+use Framework\Cache\ArrayCache;
+
+$cache = new ArrayCache();
+
+$cache->set('user.1', ['name' => 'Ada'], 300);
+$cache->get('user.1');
+$cache->delete('user.1');
+$cache->increment('hits');
+```
+
+### Null
+
+Stores nothing and reports success, so caching can be switched off without the calling code
+changing:
+
+```php
+use Framework\Cache\NullCache;
+
+$cache = IS_DEV ? new NullCache() : new RedisCache($configs, 'app-');
+
+$cache->set('user.1', ['name' => 'Ada'], 300); // true
+$cache->get('user.1');                         // null, always
+$cache->delete('user.1');                      // true
+$cache->increment('hits');                     // 1, every time
+```
+
 ## Serialization
 
 Values are turned into bytes on the way into the storage and back on the way out. Which
