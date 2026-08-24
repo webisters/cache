@@ -81,10 +81,7 @@ class FilesCache extends Cache
 
     protected function setBaseDirectory() : void
     {
-        $path = $this->configs['directory'];
-        if ($path === null) {
-            $path = \sys_get_temp_dir();
-        }
+        $path = $this->configs['directory'] ?? $this->makeDefaultDirectory();
         $real = \realpath($path);
         if ($real === false) {
             throw new RuntimeException("Invalid cache directory: {$path}");
@@ -104,6 +101,33 @@ class FilesCache extends Cache
             );
         }
         $this->baseDirectory = $real . \DIRECTORY_SEPARATOR;
+    }
+
+    /**
+     * Make the directory used when no `directory` config is given.
+     *
+     * A directory of its own inside the system temp directory, never the temp
+     * directory itself: flush and the garbage collector walk the cache
+     * directory and delete what they find in it, so pointing the cache at a
+     * directory shared with other processes would put their files at risk.
+     *
+     * The resolved path is recorded in the configs, which is what scopes the
+     * directory check in openDir.
+     *
+     * @throws RuntimeException if the directory does not exist and cannot be created
+     *
+     * @return string The directory path
+     */
+    protected function makeDefaultDirectory() : string
+    {
+        $path = \sys_get_temp_dir() . \DIRECTORY_SEPARATOR . 'webisters-cache';
+        if (!\is_dir($path) && !\mkdir($path, 0777, true) && !\is_dir($path)) {
+            throw new RuntimeException(
+                "Default cache directory was not created: {$path}"
+            );
+        }
+        $this->configs['directory'] = $path;
+        return $path;
     }
 
     public function get(string $key) : mixed
