@@ -146,6 +146,47 @@ class DatabaseCacheTest extends TestCase
         self::assertSame([], $this->cache->getMulti([]));
     }
 
+    public function testKeysLongerThanTheColumnStillRoundTrip() : void
+    {
+        // The database used to accept a longer key, truncate it and report
+        // success, after which the item could never be read back.
+        foreach ([254, 255, 256, 300, 5000] as $length) {
+            $key = \str_repeat('k', $length);
+            self::assertTrue($this->cache->set($key, 'value-' . $length, 60));
+            self::assertSame('value-' . $length, $this->cache->get($key));
+            self::assertTrue($this->cache->delete($key));
+            self::assertNull($this->cache->get($key));
+        }
+    }
+
+    public function testLongKeysSharingAHeadStayDistinct() : void
+    {
+        // Truncation made these the same row, so one could be served the
+        // other's value, which is worse than a miss.
+        $first = \str_repeat('x', 300) . 'A';
+        $second = \str_repeat('x', 300) . 'B';
+        self::assertTrue($this->cache->set($first, 'first', 60));
+        self::assertTrue($this->cache->set($second, 'second', 60));
+        self::assertSame('first', $this->cache->get($first));
+        self::assertSame('second', $this->cache->get($second));
+        self::assertSame(
+            [$first => 'first', $second => 'second'],
+            $this->cache->getMulti([$first, $second])
+        );
+    }
+
+    public function testTheWholeApiWorksOnALongKey() : void
+    {
+        $key = \str_repeat('z', 400);
+        self::assertTrue($this->cache->add($key, 'one', 60));
+        self::assertFalse($this->cache->add($key, 'two', 60));
+        self::assertSame('one', $this->cache->get($key));
+        self::assertSame(1, $this->cache->increment($key . 'c', 1, 60));
+        self::assertSame(2, $this->cache->increment($key . 'c', 1, 60));
+        self::assertTrue($this->cache->tags('posts')->set($key, 'tagged', 60));
+        self::assertSame('tagged', $this->cache->tags('posts')->get($key));
+    }
+
     protected function countRows() : int
     {
         $database = $this->cache->getDatabase(); // @phpstan-ignore-line
