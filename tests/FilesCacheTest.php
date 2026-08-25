@@ -52,9 +52,11 @@ class FilesCacheTest extends TestCase
 
     public function testGC() : void
     {
-        $this->cache->set('foo', 'bar', 1);
-        $this->cache->set('bar', 'baz', 2);
-        \sleep(1);
+        // The item that has to survive gets a comfortable life, not two
+        // seconds, or crossing a second boundary fails this on a slow runner.
+        $this->cache->set('foo', 'bar', static::SHORT_TTL);
+        $this->cache->set('bar', 'baz', static::LIVE_TTL);
+        \sleep(static::EXPIRY_WAIT);
         self::assertTrue($this->cache->gc()); // @phpstan-ignore-line
         self::assertNull($this->cache->get('foo'));
         self::assertSame('baz', $this->cache->get('bar'));
