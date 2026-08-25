@@ -14,5 +14,8 @@ return (new Config())->setDefaultHeaderComment(
     'Webisters Cache Library',
     'Hafiz Muhammad Moaz <thewebisters@gmail.com>'
 )->setFinder(
-    Finder::create()->in(__DIR__)
+    // demo/ is example code, meant to be read by someone meeting the library
+    // for the first time. A licence header on each file and a backslash on
+    // every constant would be noise in front of the thing being shown.
+    Finder::create()->in(__DIR__)->exclude('demo')
 );

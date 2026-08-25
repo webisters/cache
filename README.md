@@ -32,6 +32,19 @@ the calling code having to change.
 - **Pluggable serialization**: PHP `serialize`, igbinary, JSON, JSON as arrays, or msgpack.
 - **Debug collector** integration for the Webisters debug toolbar.
 
+## Try It
+
+The `demo/` folder has three short scripts you can run instead of reading about it:
+
+```bash
+cd demo && composer install
+php 1-tags.php       # tags, on a folder of files
+php 2-stampede.php   # ten requests, one query
+php 3-keys.php       # keys most caches refuse
+```
+
+They need PHP 8.2 and nothing else. No Redis, no Memcached, no database.
+
 ## Usage
 
 Every driver answers the same calls, so the only thing that differs between them is the line that

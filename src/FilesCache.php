@@ -273,7 +273,11 @@ class FilesCache extends Cache
         if (\is_dir($dirname)) {
             return;
         }
-        if (!\mkdir($dirname, 0777, true) || !\is_dir($dirname)) {
+        // Two processes writing new keys that shard to the same directory will
+        // both get here, and one of the two mkdir calls loses. Losing is not a
+        // failure when the directory it wanted is now there, which is why the
+        // second check has to be reached rather than skipped over by an ||.
+        if (!@\mkdir($dirname, 0777, true) && !\is_dir($dirname)) {
             throw new RuntimeException(
                 "Directory key was not created: {$filepath}"
             );
