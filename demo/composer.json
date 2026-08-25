@@ -1,0 +1,14 @@
+{
+    "description": "Runnable demos for webisters/cache",
+    "require": {
+        "webisters/cache": "*"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../"
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
