@@ -356,7 +356,10 @@ class FilesCacheTest extends TestCase
             'float' => 1.5,
             'string' => 'text',
             'bool' => true,
-            'array' => ['a' => 1, 'b' => [2, 3]],
+            // A list, not a map: this test runs under every serializer, and
+            // Serializer::JSON decodes a JSON object to stdClass rather than
+            // to an array, so a map would not come back identical.
+            'list' => [1, 2, 3],
             'zero' => 0,
             'emptyString' => '',
         ];
