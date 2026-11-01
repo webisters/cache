@@ -350,10 +350,9 @@ class TaggedCache
     {
         $status = true;
         foreach ($this->tags as $tag) {
-            $set = $this->cache->set(
+            $set = $this->writeTagVersion(
                 $this->renderTagKey($tag),
-                $this->makeVersion(),
-                $this->getTagTtl()
+                $this->makeVersion()
             );
             if (!$set) {
                 $status = false;
@@ -419,17 +418,92 @@ class TaggedCache
     protected function getTagVersion(string $tag, bool $create) : string
     {
         $tagKey = $this->renderTagKey($tag);
-        $version = $this->cache->get($tagKey);
-        if (!\is_string($version) || $version === '') {
+        [$version, $renewAt] = $this->readTagVersion($tagKey);
+        if ($version === '') {
             if (!$create) {
                 return '';
             }
             $version = $this->makeVersion();
+            $renewAt = 0;
         }
-        if ($create) {
-            $this->cache->set($tagKey, $version, $this->getTagTtl());
+        if ($create && $renewAt <= \time()) {
+            $this->writeTagVersion($tagKey, $version);
         }
         return $version;
+    }
+
+    /**
+     * Read a stored tag version and the time it is next due for renewal.
+     *
+     * Accepts the plain version string written by releases before the renewal
+     * window existed. Such a value is kept as it stands rather than replaced,
+     * because a new token would invalidate every item already carrying the old
+     * one. It reports a renewal time of zero, so the next write upgrades it to
+     * the current shape.
+     *
+     * @since 4.4
+     *
+     * @param string $tagKey The storage key holding the version
+     *
+     * @return array{0:string,1:int} The version token, empty when there is
+     * none, and the timestamp from which it should be renewed
+     */
+    protected function readTagVersion(string $tagKey) : array
+    {
+        $stored = $this->cache->get($tagKey);
+        if (\is_array($stored)
+            && isset($stored['version'], $stored['renew'])
+            && \is_string($stored['version'])
+            && $stored['version'] !== ''
+            && \is_int($stored['renew'])
+        ) {
+            return [$stored['version'], $stored['renew']];
+        }
+        if (\is_string($stored) && $stored !== '') {
+            return [$stored, 0];
+        }
+        return ['', 0];
+    }
+
+    /**
+     * Write a tag version, stamped with the time it is next due for renewal.
+     *
+     * @since 4.4
+     *
+     * @param string $tagKey The storage key holding the version
+     * @param string $version The version token to keep
+     *
+     * @return bool
+     */
+    protected function writeTagVersion(string $tagKey, string $version) : bool
+    {
+        return $this->cache->set(
+            $tagKey,
+            [
+                'version' => $version,
+                'renew' => \time() + $this->getRenewAfter(),
+            ],
+            $this->getTagTtl()
+        );
+    }
+
+    /**
+     * How long a tag version is left alone before its TTL is renewed.
+     *
+     * Half the tag TTL, so a version in active use always has at least half of
+     * its lifetime left and cannot lapse out from under the items it groups,
+     * while a hot tag is rewritten once per window instead of on every write.
+     *
+     * A tag TTL of 1 would floor to 0 and renew on every write, so the result
+     * is at least 1.
+     *
+     * @since 4.4
+     *
+     * @return int Seconds
+     */
+    protected function getRenewAfter() : int
+    {
+        return \max(1, \intdiv($this->getTagTtl(), 2));
     }
 
     /**

@@ -183,4 +183,118 @@ final class TaggedCacheTest extends TestCase
         self::assertInstanceOf(TaggedCache::class, $this->cache->tags('posts'));
         self::assertSame(['posts', 'users'], $this->cache->tags(['users', 'posts'])->getTags());
     }
+
+    public function testARepeatedTaggedWriteCostsNoMoreThanAnUntaggedOne() : void
+    {
+        $tagged = $this->cache->tags(['a', 'b', 'c']);
+        // First write creates the three tag versions alongside the item.
+        $this->cache->setCount = 0;
+        $tagged->set('key', 'value');
+        self::assertSame(4, $this->cache->setCount);
+        // Later writes reuse them. Before the renewal window every write
+        // rewrote all three versions, costing 4 writes every time.
+        $this->cache->setCount = 0;
+        $tagged->set('key', 'value');
+        self::assertSame(1, $this->cache->setCount);
+        $this->cache->setCount = 0;
+        for ($i = 0; $i < 10; $i++) {
+            $tagged->set('key' . $i, $i);
+        }
+        self::assertSame(10, $this->cache->setCount);
+    }
+
+    /**
+     * A tag TTL of 4 gives a renewal window of 2, so sleeping 3 lands past the
+     * window but before the version would expire. That is renewal rather than
+     * a lapse, and the difference is the token: a renewed version keeps it, a
+     * lapsed one gets a new one and takes its items with it.
+     */
+    public function testTagVersionIsRenewedWithoutChangingTheToken() : void
+    {
+        $tagged = $this->cache->tags('posts')->setTagTtl(4);
+        $tagged->set('list', 'value');
+        $before = $this->cache->get('@w:tag:posts');
+        self::assertIsArray($before);
+        \sleep(3);
+        $this->cache->setCount = 0;
+        $tagged->set('list', 'value');
+        self::assertSame(2, $this->cache->setCount, 'the version is rewritten');
+        $after = $this->cache->get('@w:tag:posts');
+        self::assertIsArray($after);
+        self::assertSame($before['version'], $after['version']);
+        self::assertSame('value', $tagged->get('list'));
+    }
+
+    public function testRenewalKeepsItemsReachableBeyondTheOriginalTagTtl() : void
+    {
+        $tagged = $this->cache->tags('posts')->setTagTtl(4);
+        $tagged->set('list', 'value');
+        \sleep(3);
+        // Renews the version, pushing its expiry out from 4 seconds to 7.
+        $tagged->set('other', 'second');
+        \sleep(3);
+        // Six seconds in. Without the renewal the version would have expired
+        // at four and a new token would have orphaned both items.
+        self::assertSame('value', $tagged->get('list'));
+        self::assertSame('second', $tagged->get('other'));
+    }
+
+    public function testFlushStillInvalidatesAfterARenewal() : void
+    {
+        $tagged = $this->cache->tags('posts')->setTagTtl(4);
+        $tagged->set('list', 'value');
+        \sleep(3);
+        $tagged->set('list', 'value');
+        self::assertTrue($tagged->flush());
+        self::assertNull($tagged->get('list'));
+    }
+
+    /**
+     * A version written by a release before the renewal window is a plain
+     * string. It must be kept rather than replaced, or every item already
+     * carrying it would be invalidated by the upgrade alone.
+     */
+    public function testAPlainStringVersionFromAnOlderReleaseIsKept() : void
+    {
+        $tagged = $this->cache->tags('posts');
+        $tagged->set('list', 'value');
+        $stored = $this->cache->get('@w:tag:posts');
+        self::assertIsArray($stored);
+        self::assertArrayHasKey('version', $stored);
+        $version = $stored['version'];
+        self::assertIsString($version);
+        // Put the tag key back into the old shape.
+        $this->cache->set('@w:tag:posts', $version);
+        self::assertSame('value', $tagged->get('list'));
+        // The next write upgrades the envelope without changing the token.
+        $tagged->set('list', 'again');
+        $upgraded = $this->cache->get('@w:tag:posts');
+        self::assertIsArray($upgraded);
+        self::assertSame($version, $upgraded['version']);
+        self::assertSame('again', $tagged->get('list'));
+    }
+
+    public function testAGarbageTagVersionIsReplacedRatherThanTrusted() : void
+    {
+        $tagged = $this->cache->tags('posts');
+        $tagged->set('list', 'value');
+        $this->cache->set('@w:tag:posts', ['version' => '', 'renew' => 0]);
+        // An unusable version is treated as absent, so a fresh one is made and
+        // the items under the old one are no longer reachable.
+        self::assertNull($tagged->get('list'));
+        self::assertTrue($tagged->set('list', 'new'));
+        self::assertSame('new', $tagged->get('list'));
+    }
+
+    public function testASmallestTagTtlKeepsItemsReachable() : void
+    {
+        // intdiv(1, 2) is 0, which as a renewal window would mean "renew
+        // always". The floor of 1 keeps a real window, and either way a write
+        // must never orphan the items it just grouped.
+        $tagged = $this->cache->tags('posts')->setTagTtl(1);
+        self::assertTrue($tagged->set('list', 'value'));
+        self::assertSame('value', $tagged->get('list'));
+        self::assertTrue($tagged->set('other', 'second'));
+        self::assertSame('second', $tagged->get('other'));
+    }
 }
