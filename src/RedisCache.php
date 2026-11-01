@@ -22,6 +22,15 @@ use SensitiveParameter;
  */
 class RedisCache extends Cache
 {
+    /**
+     * How many keys SCAN is asked for per round trip while sweeping.
+     *
+     * @since 4.4
+     *
+     * @var int
+     */
+    protected const SCAN_COUNT = 1000;
+
     protected Redis $redis;
     /**
      * Redis Cache handler configurations.
@@ -241,16 +250,106 @@ class RedisCache extends Cache
         return (bool) $this->redis->del($this->renderKey($key));
     }
 
+    /**
+     * Removes this cache's items from the storage.
+     *
+     * When a prefix is set, only the keys carrying it are removed, found with
+     * SCAN and deleted in batches. Redis sets no key length limit, so this
+     * driver never digests a key, which means every key this instance wrote
+     * really does start with the prefix and the sweep is exact.
+     *
+     * Without a prefix this instance's keys cannot be told apart from anything
+     * else in the database, so the selected database is flushed instead. It is
+     * never the whole server: see RedisCache::flushStorage().
+     *
+     * @see RedisCache::flushStorage()
+     *
+     * @return bool
+     */
     public function flush() : bool
     {
         if (isset($this->debugCollector)) {
             $start = \microtime(true);
             return $this->addDebugFlush(
                 $start,
-                $this->redis->flushAll()
+                $this->flushValues()
             );
         }
-        return $this->redis->flushAll();
+        return $this->flushValues();
+    }
+
+    protected function flushValues() : bool
+    {
+        if ((string) $this->prefix === '') {
+            return $this->redis->flushDb();
+        }
+        return $this->deleteByPattern($this->escapePattern((string) $this->prefix) . '*');
+    }
+
+    /**
+     * Removes every key from the database this instance selected.
+     *
+     * This ignores the prefix, so it takes anything else sharing the same
+     * database with it. It is still scoped to that one database and never
+     * reaches the rest of the server, which is why FLUSHALL is not used
+     * anywhere in this driver.
+     *
+     * @since 4.4
+     * @see RedisCache::flush()
+     *
+     * @return bool
+     */
+    public function flushStorage() : bool
+    {
+        if (isset($this->debugCollector)) {
+            $start = \microtime(true);
+            return $this->addDebugFlush(
+                $start,
+                $this->redis->flushDb()
+            );
+        }
+        return $this->redis->flushDb();
+    }
+
+    /**
+     * Deletes every key matching a glob pattern, in batches.
+     *
+     * SCAN is used rather than KEYS so a large keyspace does not block the
+     * server for the length of the sweep.
+     *
+     * @param string $pattern A Redis glob pattern
+     *
+     * @return bool
+     */
+    protected function deleteByPattern(string $pattern) : bool
+    {
+        $iterator = null;
+        $status = true;
+        do {
+            $keys = $this->redis->scan($iterator, $pattern, static::SCAN_COUNT);
+            if ($keys === false) {
+                return false;
+            }
+            if ($keys !== [] && $this->redis->del($keys) === false) {
+                $status = false;
+            }
+        } while ($iterator > 0);
+        return $status;
+    }
+
+    /**
+     * Escapes the glob metacharacters Redis pattern matching understands.
+     *
+     * A prefix is a literal string, so a prefix containing *, ?, [, ] or \\
+     * must not be read as a pattern or the sweep would match the wrong keys.
+     *
+     * @param string $pattern
+     *
+     * @return string
+     */
+    protected function escapePattern(string $pattern) : string
+    {
+        return \addcslashes($pattern, '*?[]^\\');
     }
 
     #[Override]
