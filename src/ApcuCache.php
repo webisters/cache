@@ -9,6 +9,7 @@
  */
 namespace Framework\Cache;
 
+use APCuIterator;
 use RuntimeException;
 
 /**
@@ -22,7 +23,7 @@ class ApcuCache extends Cache
 {
     protected function initialize() : void
     {
-        if (!\apcu_enabled()) {
+        if (!apcu_enabled()) {
             throw new RuntimeException('APCu extension is not enabled');
         }
     }
@@ -42,7 +43,7 @@ class ApcuCache extends Cache
 
     protected function getValue(string $key) : mixed
     {
-        $key = \apcu_fetch($this->renderKey($key), $success);
+        $key = apcu_fetch($this->renderKey($key), $success);
         return $success
             ? $this->unserialize($key)
             : null;
@@ -63,14 +64,14 @@ class ApcuCache extends Cache
                 $ttl,
                 $start,
                 $value,
-                \apcu_store(
+                apcu_store(
                     $this->renderKey($key),
                     $this->serialize($value),
                     $this->makeTtl($ttl)
                 )
             );
         }
-        return \apcu_store(
+        return apcu_store(
             $this->renderKey($key),
             $this->serialize($value),
             $this->makeTtl($ttl)
@@ -91,14 +92,14 @@ class ApcuCache extends Cache
                 $ttl,
                 $start,
                 $value,
-                \apcu_add(
+                apcu_add(
                     $this->renderKey($key),
                     $this->serialize($value),
                     $this->makeTtl($ttl)
                 )
             );
         }
-        return \apcu_add(
+        return apcu_add(
             $this->renderKey($key),
             $this->serialize($value),
             $this->makeTtl($ttl)
@@ -112,21 +113,67 @@ class ApcuCache extends Cache
             return $this->addDebugDelete(
                 $key,
                 $start,
-                \apcu_delete($this->renderKey($key))
+                apcu_delete($this->renderKey($key))
             );
         }
-        return \apcu_delete($this->renderKey($key));
+        return apcu_delete($this->renderKey($key));
     }
 
+    /**
+     * Removes this cache's items from the storage.
+     *
+     * With a prefix set, only the entries carrying it are removed, found with
+     * an APCuIterator over the shared memory cache. APCu sets no key length
+     * limit, so this driver never digests a key and every entry it wrote
+     * really does start with the prefix.
+     *
+     * Without a prefix the entries cannot be told apart from those of anything
+     * else sharing the APCu cache, which on a web server is every application
+     * in the same process pool, so the whole cache is cleared.
+     *
+     * @see ApcuCache::flushStorage()
+     *
+     * @return bool
+     */
     public function flush() : bool
     {
         if (isset($this->debugCollector)) {
             $start = \microtime(true);
             return $this->addDebugFlush(
                 $start,
-                \apcu_clear_cache()
+                $this->flushValues()
             );
         }
-        return \apcu_clear_cache();
+        return $this->flushValues();
+    }
+
+    protected function flushValues() : bool
+    {
+        if (!$this->hasPrefix()) {
+            return apcu_clear_cache();
+        }
+        return apcu_delete(
+            new APCuIterator('/^' . \preg_quote((string) $this->prefix, '/') . '/')
+        ) !== false;
+    }
+
+    /**
+     * Removes every entry from the APCu cache, whatever its prefix.
+     *
+     * APCu is shared by every process in the pool, so this takes the items of
+     * other applications running beside this one as well.
+     *
+     * @since 4.4
+     * @see ApcuCache::flush()
+     *
+     * @return bool
+     */
+    public function flushStorage() : bool
+    {
+        if (isset($this->debugCollector)) {
+            $start = \microtime(true);
+            return $this->addDebugFlush($start, apcu_clear_cache());
+        }
+        return apcu_clear_cache();
     }
 }

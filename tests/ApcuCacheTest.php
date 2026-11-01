@@ -10,6 +10,7 @@
 namespace Tests\Cache;
 
 use Framework\Cache\ApcuCache;
+use Framework\Cache\Cache;
 
 class ApcuCacheTest extends TestCase
 {
@@ -49,5 +50,10 @@ class ApcuCacheTest extends TestCase
     public function testDefaultConfigs() : void
     {
         self::assertInstanceOf(ApcuCache::class, new ApcuCache());
+    }
+
+    protected function makeSiblingCache(string $prefix) : ?Cache
+    {
+        return new ApcuCache($this->configs, $prefix, $this->serializer, $this->getLogger());
     }
 }

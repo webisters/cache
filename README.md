@@ -69,6 +69,39 @@ Only `$configs` is required, and only for the drivers that need somewhere to con
 is what lets several applications share one storage without colliding: it is prepended to every
 key, except on `FilesCache`, where it names a subdirectory instead (see below).
 
+### Clearing the cache
+
+`flush()` clears **this instance's items**, the ones carrying its prefix. `flushStorage()` is the
+deliberate opposite: it ignores the prefix and clears everything in the storage, including whatever
+else is sharing it.
+
+```php
+$cache = new RedisCache(['host' => '127.0.0.1', 'database' => 3], 'app-');
+
+$cache->flush();        // only the app- keys in database 3
+$cache->flushStorage(); // everything in database 3, never the rest of the server
+```
+
+The safe one is the default, because `flush()` reads like a routine local operation at the call
+site. How exactly each driver scopes it:
+
+| Driver | `flush()` clears | How |
+| --- | --- | --- |
+| Redis | keys carrying the prefix | `SCAN` then `DEL`, in batches |
+| Files | the prefix directory | the prefix is a directory here |
+| APCu | entries carrying the prefix | `APCuIterator` |
+| Database | rows whose key starts with the prefix | `INSTR(key, prefix) = 1` |
+| Array | entries carrying the prefix | the array is private to the instance anyway |
+| Memcached | **the whole instance** | see below |
+
+Without a prefix there is nothing to scope by, so `flush()` clears the storage, which is the same
+thing `flushStorage()` does.
+
+**Memcached is the exception.** It offers no way to list or select keys, so `flush()` there clears
+the whole instance and takes the items of anything else sharing it. Two applications with different
+prefixes stay out of each other's way on every read and write, and then both lose everything when
+either one flushes. Scoping it would need a version marker in the key, which is tracked separately.
+
 ### Files
 
 Items live in a directory. Good default when there is no cache server to hand.

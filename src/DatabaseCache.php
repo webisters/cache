@@ -459,6 +459,34 @@ class DatabaseCache extends Cache
 
     protected function flushValues() : bool
     {
+        if (!$this->hasPrefix()) {
+            return $this->deleteEveryRow();
+        }
+        try {
+            // INSTR(key, prefix) = 1 means "starts with", without the wildcard
+            // escaping LIKE would need. A prefix containing % or _ is matched
+            // literally, and there is no ESCAPE clause to get wrong.
+            $this->database->exec(
+                'DELETE FROM ' . $this->protect($this->getTable())
+                . ' WHERE INSTR(' . $this->protect($this->getColumn('key'))
+                . ', ' . $this->database->quote((string) $this->prefix) . ') = 1'
+            );
+            return true;
+        } catch (mysqli_sql_exception $exception) {
+            $this->log('Cache (database): ' . $exception->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Delete every row in the cache table.
+     *
+     * @since 4.4
+     *
+     * @return bool
+     */
+    protected function deleteEveryRow() : bool
+    {
         try {
             $this->database->exec(
                 'DELETE FROM ' . $this->protect($this->getTable())
@@ -468,6 +496,23 @@ class DatabaseCache extends Cache
             $this->log('Cache (database): ' . $exception->getMessage());
             return false;
         }
+    }
+
+    /**
+     * Removes every row from the cache table, whatever its prefix.
+     *
+     * @since 4.4
+     * @see DatabaseCache::flush()
+     *
+     * @return bool
+     */
+    public function flushStorage() : bool
+    {
+        if (isset($this->debugCollector)) {
+            $start = \microtime(true);
+            return $this->addDebugFlush($start, $this->deleteEveryRow());
+        }
+        return $this->deleteEveryRow();
     }
 
     /**

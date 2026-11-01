@@ -220,6 +220,90 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         );
     }
 
+    /**
+     * Build a second cache on the same storage under a different prefix.
+     *
+     * Drivers whose configuration cannot express that return null and the
+     * prefix tests skip.
+     *
+     * @param string $prefix
+     *
+     * @return Cache|null
+     */
+    protected function makeSiblingCache(string $prefix) : ?Cache
+    {
+        return null;
+    }
+
+    /**
+     * Whether flush() on this driver is scoped to the instance's prefix.
+     *
+     * Memcached cannot list or select keys, so it is the one driver that
+     * cannot do this. It overrides to false and says why.
+     *
+     * @return bool
+     */
+    protected function flushIsPrefixScoped() : bool
+    {
+        return true;
+    }
+
+    public function testFlushLeavesAnotherPrefixAlone() : void
+    {
+        $sibling = $this->makeSiblingCache('sibling-');
+        if ($sibling === null) {
+            self::markTestSkipped('this driver cannot share a storage');
+        }
+        self::assertTrue($this->cache->set('key', 'mine', static::LIVE_TTL));
+        self::assertTrue($sibling->set('key', 'theirs', static::LIVE_TTL));
+        self::assertTrue($this->cache->flush());
+        self::assertNull($this->cache->get('key'));
+        if (!$this->flushIsPrefixScoped()) {
+            // Recorded rather than asserted away: this is the behaviour #49
+            // wants changed and cannot be on this driver yet.
+            self::assertNull($sibling->get('key'));
+            $sibling->flush();
+            return;
+        }
+        self::assertSame('theirs', $sibling->get('key'));
+        $sibling->flush();
+    }
+
+    public function testFlushStorageIgnoresThePrefix() : void
+    {
+        $sibling = $this->makeSiblingCache('sibling-');
+        if ($sibling === null) {
+            self::markTestSkipped('this driver cannot share a storage');
+        }
+        self::assertTrue($this->cache->set('key', 'mine', static::LIVE_TTL));
+        self::assertTrue($sibling->set('key', 'theirs', static::LIVE_TTL));
+        self::assertTrue($this->cache->flushStorage());
+        self::assertNull($this->cache->get('key'));
+        self::assertNull($sibling->get('key'));
+    }
+
+    public function testFlushClearsALongKeyThatHadToBeDigested() : void
+    {
+        $sibling = $this->makeSiblingCache('sibling-');
+        if ($sibling === null) {
+            self::markTestSkipped('this driver cannot share a storage');
+        }
+        // Longer than the longest MAX_KEY_LENGTH among the drivers, so the
+        // ones that digest really do digest it. A digested name used to lose
+        // the prefix, which left it behind on a prefix scoped flush.
+        $long = \str_repeat('k', 300);
+        self::assertTrue($this->cache->set($long, 'mine', static::LIVE_TTL));
+        self::assertTrue($sibling->set($long, 'theirs', static::LIVE_TTL));
+        self::assertSame('mine', $this->cache->get($long));
+        self::assertSame('theirs', $sibling->get($long));
+        self::assertTrue($this->cache->flush());
+        self::assertNull($this->cache->get($long));
+        if ($this->flushIsPrefixScoped()) {
+            self::assertSame('theirs', $sibling->get($long));
+        }
+        $sibling->flush();
+    }
+
     public function testNullTtlUsesTheInstanceDefault() : void
     {
         $this->cache->setDefaultTtl(30);

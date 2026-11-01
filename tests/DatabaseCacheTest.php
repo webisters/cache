@@ -9,6 +9,7 @@
  */
 namespace Tests\Cache;
 
+use Framework\Cache\Cache;
 use Framework\Cache\DatabaseCache;
 use Framework\Database\Database;
 
@@ -206,5 +207,10 @@ class DatabaseCacheTest extends TestCase
         return (int) $database->query(
             "SHOW SESSION STATUS LIKE 'Com_stmt_execute'"
         )->fetchArray()['Value'];
+    }
+
+    protected function makeSiblingCache(string $prefix) : ?Cache
+    {
+        return new DatabaseCache($this->configs, $prefix, $this->serializer, $this->getLogger());
     }
 }

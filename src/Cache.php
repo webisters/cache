@@ -399,6 +399,44 @@ abstract class Cache
     abstract public function flush() : bool;
 
     /**
+     * Removes everything from the cache storage, not only this instance's
+     * items.
+     *
+     * flush() clears what this instance wrote, which is almost always what a
+     * caller wants and is the safe default. This is the deliberate opposite:
+     * it ignores the prefix and takes anything else sharing the storage with
+     * it.
+     *
+     * The default is flush(), which is correct for a driver whose storage
+     * holds nothing but this instance's items. A driver that can reach further
+     * overrides it.
+     *
+     * @since 4.4
+     * @see Cache::flush()
+     *
+     * @return bool
+     */
+    public function flushStorage() : bool
+    {
+        return $this->flush();
+    }
+
+    /**
+     * Tell whether this instance has a prefix to scope its items by.
+     *
+     * Without one, its items cannot be told apart from anything else in the
+     * storage, so flush() can only fall back to clearing the storage.
+     *
+     * @since 4.4
+     *
+     * @return bool
+     */
+    protected function hasPrefix() : bool
+    {
+        return (string) $this->prefix !== '';
+    }
+
+    /**
      * Sets one item to the cache storage only if it is not there yet.
      *
      * The check and the write are one atomic operation on every driver that
@@ -1057,7 +1095,12 @@ abstract class Cache
      */
     protected function digestKey(string $key) : string
     {
-        return static::RESERVED_PREFIX . 'sha256:' . \hash('sha256', $key);
+        // The prefix stays outside the hash so the stored name can still be
+        // selected on, which is what lets flush() clear only this instance's
+        // items on the drivers that digest. The hash still covers the prefixed
+        // key, so two prefixes never collide.
+        return $this->prefix . static::RESERVED_PREFIX
+            . 'sha256:' . \hash('sha256', $key);
     }
 
     /**
@@ -1070,7 +1113,7 @@ abstract class Cache
     protected function serialize(mixed $value) : string
     {
         if ($this->serializer === Serializer::IGBINARY) {
-            return $this->assertSerialized(\igbinary_serialize($value));
+            return $this->assertSerialized(igbinary_serialize($value));
         }
         if ($this->serializer === Serializer::JSON
             || $this->serializer === Serializer::JSON_ARRAY
@@ -1078,7 +1121,7 @@ abstract class Cache
             return \json_encode($value, \JSON_THROW_ON_ERROR);
         }
         if ($this->serializer === Serializer::MSGPACK) {
-            return $this->assertSerialized(\msgpack_serialize($value));
+            return $this->assertSerialized(msgpack_serialize($value));
         }
         return \serialize($value);
     }
@@ -1116,7 +1159,7 @@ abstract class Cache
     protected function unserialize(string $value) : mixed
     {
         if ($this->serializer === Serializer::IGBINARY) {
-            return @\igbinary_unserialize($value);
+            return @igbinary_unserialize($value);
         }
         if ($this->serializer === Serializer::JSON) {
             return \json_decode($value);
@@ -1125,7 +1168,7 @@ abstract class Cache
             return \json_decode($value, true);
         }
         if ($this->serializer === Serializer::MSGPACK) {
-            return \msgpack_unserialize($value);
+            return msgpack_unserialize($value);
         }
         return \unserialize($value, ['allowed_classes' => true]);
     }

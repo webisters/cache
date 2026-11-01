@@ -163,6 +163,30 @@ class ArrayCache extends Cache
 
     protected function flushValues() : bool
     {
+        if (!$this->hasPrefix()) {
+            $this->storage = [];
+            return true;
+        }
+        foreach (\array_keys($this->storage) as $key) {
+            if (\str_starts_with($key, (string) $this->prefix)) {
+                unset($this->storage[$key]);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Removes every item from this instance's storage, whatever its prefix.
+     *
+     * The array is private to the instance, so this reaches no further than
+     * flush() does on an instance without a prefix.
+     *
+     * @since 4.4
+     *
+     * @return bool
+     */
+    public function flushStorage() : bool
+    {
         $this->storage = [];
         return true;
     }
