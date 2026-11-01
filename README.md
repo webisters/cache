@@ -92,14 +92,16 @@ Leave `directory` out and it uses a directory of its own inside the system temp 
 [Maintenance](#maintenance) for collecting expired files.
 
 **The prefix works differently here.** On every other driver it is prepended to the key. On this
-one it names a **subdirectory of `directory`**, which must already exist:
+one it names a **subdirectory of `directory`**:
 
 ```php
-// /var/www/app/storage/cache/app/ has to be there first
+// Creates /var/www/app/storage/cache/app/ if it is not there yet
 $cache = new FilesCache(['directory' => '/var/www/app/storage/cache'], 'app');
 ```
 
-Construction throws `Invalid cache directory path` if it is not, rather than creating it.
+The subdirectory is created when missing, as 0700, so it is closed to other users for the same
+reason the default directory is. `directory` itself still has to exist: creating that would mean
+guessing where it belongs.
 
 ### APCu
 
