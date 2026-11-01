@@ -436,6 +436,9 @@ vendor/bin/phpunit
 ```
 Follow consistent coding style and run available linters before opening pull requests.
 
+## Changelog
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## Support
 - Issues: https://github.com/webisters/cache/issues
 - Source: https://github.com/webisters/cache
