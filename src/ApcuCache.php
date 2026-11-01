@@ -9,6 +9,7 @@
  */
 namespace Framework\Cache;
 
+use APCuIterator;
 use RuntimeException;
 
 /**
@@ -118,14 +119,60 @@ class ApcuCache extends Cache
         return \apcu_delete($this->renderKey($key));
     }
 
+    /**
+     * Removes this cache's items from the storage.
+     *
+     * With a prefix set, only the entries carrying it are removed, found with
+     * an APCuIterator over the shared memory cache. APCu sets no key length
+     * limit, so this driver never digests a key and every entry it wrote
+     * really does start with the prefix.
+     *
+     * Without a prefix the entries cannot be told apart from those of anything
+     * else sharing the APCu cache, which on a web server is every application
+     * in the same process pool, so the whole cache is cleared.
+     *
+     * @see ApcuCache::flushStorage()
+     *
+     * @return bool
+     */
     public function flush() : bool
     {
         if (isset($this->debugCollector)) {
             $start = \microtime(true);
             return $this->addDebugFlush(
                 $start,
-                \apcu_clear_cache()
+                $this->flushValues()
             );
+        }
+        return $this->flushValues();
+    }
+
+    protected function flushValues() : bool
+    {
+        if (!$this->hasPrefix()) {
+            return \apcu_clear_cache();
+        }
+        return \apcu_delete(
+            new APCuIterator('/^' . \preg_quote((string) $this->prefix, '/') . '/')
+        ) !== false;
+    }
+
+    /**
+     * Removes every entry from the APCu cache, whatever its prefix.
+     *
+     * APCu is shared by every process in the pool, so this takes the items of
+     * other applications running beside this one as well.
+     *
+     * @since 4.4
+     * @see ApcuCache::flush()
+     *
+     * @return bool
+     */
+    public function flushStorage() : bool
+    {
+        if (isset($this->debugCollector)) {
+            $start = \microtime(true);
+            return $this->addDebugFlush($start, \apcu_clear_cache());
         }
         return \apcu_clear_cache();
     }

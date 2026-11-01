@@ -9,6 +9,7 @@
  */
 namespace Tests\Cache;
 
+use Framework\Cache\Cache;
 use Framework\Cache\ConnectionException;
 use Framework\Cache\RedisCache;
 
@@ -307,5 +308,15 @@ class RedisCacheTest extends TestCase
             $cache->getMulti(['here', 'gone', 'never'])
         );
         $cache->flush();
+    }
+
+    protected function makeSiblingCache(string $prefix) : ?Cache
+    {
+        return new RedisCache(
+            ['host' => \getenv('REDIS_HOST')],
+            $prefix,
+            $this->serializer,
+            $this->getLogger()
+        );
     }
 }

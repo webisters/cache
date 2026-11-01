@@ -560,6 +560,17 @@ class FilesCache extends Cache
         return $this->deleteFile($this->renderFilepath($key));
     }
 
+    /**
+     * Removes this cache's items from the storage.
+     *
+     * The prefix names a subdirectory here, so this driver has always been
+     * correctly scoped: it starts from the prefix directory and never sees
+     * what another prefix wrote.
+     *
+     * @see FilesCache::flushStorage()
+     *
+     * @return bool
+     */
     public function flush() : bool
     {
         if (isset($this->debugCollector)) {
@@ -570,6 +581,25 @@ class FilesCache extends Cache
             );
         }
         return $this->deleteAll($this->baseDirectory);
+    }
+
+    /**
+     * Removes everything under the configured directory, every prefix
+     * included.
+     *
+     * @since 4.4
+     * @see FilesCache::flush()
+     *
+     * @return bool
+     */
+    public function flushStorage() : bool
+    {
+        $directory = (string) ($this->configs['directory'] ?? $this->baseDirectory);
+        if (isset($this->debugCollector)) {
+            $start = \microtime(true);
+            return $this->addDebugFlush($start, $this->deleteAll($directory));
+        }
+        return $this->deleteAll($directory);
     }
 
     /**

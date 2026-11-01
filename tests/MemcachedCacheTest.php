@@ -9,6 +9,7 @@
  */
 namespace Tests\Cache;
 
+use Framework\Cache\Cache;
 use Framework\Cache\ConnectionException;
 use Framework\Cache\MemcachedCache;
 
@@ -190,5 +191,26 @@ class MemcachedCacheTest extends TestCase
             $cache->deleteMulti(['here', 'never'])
         );
         $cache->flush();
+    }
+
+    protected function makeSiblingCache(string $prefix) : ?Cache
+    {
+        return new MemcachedCache(
+            ['servers' => [['host' => \getenv('MEMCACHED_HOST'), 'port' => 11211]]],
+            $prefix,
+            $this->serializer,
+            $this->getLogger()
+        );
+    }
+
+    /**
+     * Memcached offers no way to list or select keys, so flush() cannot be
+     * scoped to the prefix. See the docblock on MemcachedCache::flush().
+     *
+     * @return bool
+     */
+    protected function flushIsPrefixScoped() : bool
+    {
+        return false;
     }
 }

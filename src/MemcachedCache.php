@@ -372,6 +372,27 @@ class MemcachedCache extends Cache
         return $this->memcached->delete($this->renderKey($key));
     }
 
+    /**
+     * Removes every item from the Memcached instance, this cache's and
+     * everything else's.
+     *
+     * This is the one driver where flush() cannot be scoped to the prefix.
+     * Memcached offers no way to list or select keys: getAllKeys() is
+     * unreliable and deprecated, and there is no equivalent of SCAN or of an
+     * APCuIterator. Clearing only this instance's items would need the
+     * tag-style version marker the library already uses for tags, which
+     * changes the key layout and costs a read per operation, so it is a
+     * decision of its own rather than part of this change.
+     *
+     * Until then: two applications sharing a Memcached with different
+     * prefixes keep out of each other's way on every read and write, and then
+     * both lose everything when either calls flush(). Reach for
+     * flushStorage() when that is what you mean, so the call site says so.
+     *
+     * @see MemcachedCache::flushStorage()
+     *
+     * @return bool
+     */
     public function flush() : bool
     {
         if (isset($this->debugCollector)) {
@@ -382,6 +403,23 @@ class MemcachedCache extends Cache
             );
         }
         return $this->memcached->flush();
+    }
+
+    /**
+     * Removes every item from the Memcached instance, whatever its prefix.
+     *
+     * Identical to flush() on this driver, for the reason given there. It
+     * exists so a caller that means "clear the whole instance" can say so, and
+     * so that meaning keeps working if flush() is ever scoped.
+     *
+     * @since 4.4
+     * @see MemcachedCache::flush()
+     *
+     * @return bool
+     */
+    public function flushStorage() : bool
+    {
+        return $this->flush();
     }
 
     #[Override]

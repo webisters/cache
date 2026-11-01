@@ -9,6 +9,7 @@
  */
 namespace Tests\Cache;
 
+use Framework\Cache\Cache;
 use Framework\Cache\FilesCache;
 
 class FilesCacheTest extends TestCase
@@ -456,5 +457,10 @@ class FilesCacheTest extends TestCase
         self::assertTrue($cache->delete('never-written'));
         self::assertTrue($cache->delete('never-written'));
         $cache->flush();
+    }
+
+    protected function makeSiblingCache(string $prefix) : ?Cache
+    {
+        return new FilesCache($this->configs, $prefix, $this->serializer, $this->getLogger());
     }
 }
