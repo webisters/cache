@@ -4,3 +4,13 @@ parameters:
         - src
         - tests
     treatPhpDocTypesAsCertain: false
+    ignoreErrors:
+        # A test often asserts against the same literal it just wrote, and
+        # PHPStan can prove the comparison from the call it already saw. The
+        # assertion is still the point of the test at run time, and rewriting it
+        # to defeat the analyser would make it worse. Scoped to a single rule
+        # under tests/ rather than listed line by line, so it cannot quietly
+        # absorb a real finding in src.
+        -
+            identifier: staticMethod.alreadyNarrowedType
+            path: tests/*
