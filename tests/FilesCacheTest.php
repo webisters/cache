@@ -121,14 +121,68 @@ class FilesCacheTest extends TestCase
         new FilesCache($this->configs, $this->prefix, $this->serializer);
     }
 
-    public function testInvalidCacheDirectoryPath() : void
+    public function testPrefixDirectoryIsCreatedWhenMissing() : void
     {
-        $this->prefix = 'foo';
+        // Used to throw "Invalid cache directory path", which made the same
+        // prefix argument that works on every other driver stop this one from
+        // starting. See issue #52.
+        $prefix = 'created-by-construction';
+        $directory = $this->configs['directory'] . $prefix;
+        self::assertDirectoryDoesNotExist($directory);
+        $cache = new FilesCache($this->configs, $prefix, $this->serializer);
+        self::assertDirectoryExists($directory);
+        self::assertTrue($cache->set('key', 'value', static::LIVE_TTL));
+        self::assertSame('value', $cache->get('key'));
+        self::assertTrue($cache->flush());
+    }
+
+    public function testPrefixDirectoryIsCreatedPrivateToThisUser() : void
+    {
+        $prefix = 'private-prefix';
+        $cache = new FilesCache($this->configs, $prefix, $this->serializer);
+        self::assertSame(
+            0,
+            \fileperms($this->configs['directory'] . $prefix) & 0o077,
+            'the prefix directory must be closed to other users'
+        );
+        $cache->flush();
+    }
+
+    public function testPrefixDirectoryThatIsAFileThrows() : void
+    {
+        $prefix = 'occupied';
+        \file_put_contents($this->configs['directory'] . $prefix, 'not a directory');
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage(
-            "Invalid cache directory path: {$this->configs['directory']}{$this->prefix}"
+            "Cache directory for the prefix '{$prefix}' was not created: "
+            . $this->configs['directory'] . $prefix
         );
-        new FilesCache($this->configs, $this->prefix, $this->serializer);
+        new FilesCache($this->configs, $prefix, $this->serializer);
+    }
+
+    /**
+     * Issue #62: openDir() compares a canonical path against the configured
+     * one, so an unresolved spelling in the configs made every directory walk
+     * refuse to run and flush() report failure without clearing anything.
+     */
+    public function testFlushWorksWhateverSpellingTheDirectoryWasGiven() : void
+    {
+        $base = \rtrim($this->configs['directory'], \DIRECTORY_SEPARATOR);
+        \mkdir($base . \DIRECTORY_SEPARATOR . 'sibling', 0700, true);
+        $spellings = [
+            $base,
+            $base . \DIRECTORY_SEPARATOR,
+            $base . \DIRECTORY_SEPARATOR . '.' . \DIRECTORY_SEPARATOR,
+            $base . \DIRECTORY_SEPARATOR . 'sibling' . \DIRECTORY_SEPARATOR . '..',
+        ];
+        foreach ($spellings as $spelling) {
+            $configs = $this->configs;
+            $configs['directory'] = $spelling;
+            $cache = new FilesCache($configs, 'spelling', $this->serializer);
+            self::assertTrue($cache->set('key', 'value', static::LIVE_TTL), $spelling);
+            self::assertTrue($cache->flush(), $spelling);
+            self::assertNull($cache->get('key'), $spelling);
+        }
     }
 
     public function testDefaultConfigs() : void

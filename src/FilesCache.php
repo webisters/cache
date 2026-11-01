@@ -111,6 +111,27 @@ class FilesCache extends Cache
         }
     }
 
+    /**
+     * Resolve the directory this instance keeps its items in.
+     *
+     * The configured directory has to exist already, because creating it would
+     * mean guessing where it belongs and with what permissions. The prefix
+     * subdirectory under it is created when missing, in line with the sharding
+     * subdirectories and the default directory, which this class already
+     * creates for itself.
+     *
+     * The resolved path is canonical and is written back to the configs,
+     * because openDir() scopes every directory walk by comparing against it.
+     * A configured path containing a "." or ".." segment used to leave the
+     * configs holding the unresolved spelling, which could never match the
+     * canonical path openDir() computed, so flush(), gc() and purge() became
+     * no-ops that reported failure.
+     *
+     * @throws RuntimeException if the directory cannot be resolved, the prefix
+     * subdirectory cannot be created, or either is not writable
+     *
+     * @return void
+     */
     protected function setBaseDirectory() : void
     {
         $path = $this->configs['directory'] ?? $this->makeDefaultDirectory();
@@ -118,21 +139,32 @@ class FilesCache extends Cache
         if ($real === false) {
             throw new RuntimeException("Invalid cache directory: {$path}");
         }
-        $real = \rtrim($path, \DIRECTORY_SEPARATOR) . \DIRECTORY_SEPARATOR;
-        if (isset($this->prefix[0])) {
-            $real .= $this->prefix;
-        }
-        if (!\is_dir($real)) {
-            throw new RuntimeException(
-                "Invalid cache directory path: {$real}"
-            );
-        }
+        $real = \rtrim($real, \DIRECTORY_SEPARATOR) . \DIRECTORY_SEPARATOR;
         if (!\is_writable($real)) {
             throw new RuntimeException(
                 "Cache directory is not writable: {$real}"
             );
         }
-        $this->baseDirectory = $real . \DIRECTORY_SEPARATOR;
+        // Canonical and separator terminated, so openDir() compares on a path
+        // boundary rather than on a bare string prefix, where a sibling
+        // directory such as "app-old" would pass a check meant for "app".
+        $this->configs['directory'] = $real;
+        if (isset($this->prefix[0])) {
+            $real .= $this->prefix;
+            if (!\is_dir($real) && !@\mkdir($real, 0700, true) && !\is_dir($real)) {
+                throw new RuntimeException(
+                    "Cache directory for the prefix '{$this->prefix}'"
+                    . " was not created: {$real}"
+                );
+            }
+            if (!\is_writable($real)) {
+                throw new RuntimeException(
+                    "Cache directory is not writable: {$real}"
+                );
+            }
+            $real .= \DIRECTORY_SEPARATOR;
+        }
+        $this->baseDirectory = $real;
     }
 
     /**
