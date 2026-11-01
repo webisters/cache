@@ -424,29 +424,72 @@ class FilesCache extends Cache
         // Hard linking the finished file into place refuses to overwrite, so
         // it claims the name and publishes the contents in the same step. The
         // loser of a race sees a complete item, never an empty placeholder.
-        if (@\link($temporary, $filepath)) {
-            @\unlink($temporary);
+        if ($this->linkFile($temporary, $filepath)) {
+            $this->deleteTemporaryFile($temporary);
             return true;
         }
         if (\is_file($filepath)) {
-            @\unlink($temporary);
+            $this->deleteTemporaryFile($temporary);
             return false;
         }
         // The file system has no hard links. Claim the name with an exclusive
-        // create and move the finished file over the placeholder.
+        // create, then write the contents through the handle that claim gave
+        // us.
+        //
+        // Renaming a finished file over the placeholder would be tidier, but
+        // Windows refuses a rename onto a path another process holds open, and
+        // isExpiredFile() opens exactly that path. The loser of that rename
+        // used to remove the placeholder on its way out, so the callers that
+        // had already stood down kept their refusal while the winner undid its
+        // own claim, and nobody ended up holding the key. Writing through the
+        // handle removes the rename, and with it that outcome.
         $handle = @\fopen($filepath, 'xb');
         if ($handle === false) {
-            @\unlink($temporary);
+            $this->deleteTemporaryFile($temporary);
             return false;
         }
-        \fclose($handle);
-        if (!@\rename($temporary, $filepath)) {
-            @\unlink($temporary);
+        $this->deleteTemporaryFile($temporary);
+        $written = @\fwrite($handle, $contents);
+        @\fclose($handle);
+        if ($written !== \strlen($contents)) {
             $this->deleteFile($filepath);
             $this->log("Cache (files): File '{$filepath}' could not be written");
             return false;
         }
         return true;
+    }
+
+    /**
+     * Hard links a finished file into its final name.
+     *
+     * Wrapped in a method so the link-less path below it can be exercised on a
+     * file system that does support hard links.
+     *
+     * @since 4.4
+     *
+     * @param string $from The finished temporary file
+     * @param string $to The final file path
+     *
+     * @return bool TRUE when the link was made, FALSE when the file system
+     * does not support it or the name was already taken
+     */
+    protected function linkFile(string $from, string $to) : bool
+    {
+        return @\link($from, $to);
+    }
+
+    /**
+     * Removes a temporary file, ignoring a file that is already gone.
+     *
+     * @since 4.4
+     *
+     * @param string $filepath
+     *
+     * @return void
+     */
+    protected function deleteTemporaryFile(string $filepath) : void
+    {
+        @\unlink($filepath);
     }
 
     /**
@@ -629,7 +672,7 @@ class FilesCache extends Cache
             }
             $path = $baseDirectory . $path;
             if (\is_file($path)) {
-                if (\unlink($path)) {
+                if (@\unlink($path) || !\is_file($path)) {
                     continue;
                 }
                 $this->log("Cache (files): File '{$path}' could not be deleted");
@@ -651,14 +694,20 @@ class FilesCache extends Cache
 
     protected function deleteFile(string $filepath) : bool
     {
-        if (\is_file($filepath)) {
-            $deleted = \unlink($filepath);
-            if ($deleted === false) {
-                $this->log("Cache (files): File '{$filepath}' could not be deleted");
-                return false;
-            }
+        if (!\is_file($filepath)) {
+            return true;
         }
-        return true;
+        // Another process may remove the file between the check above and the
+        // call below, so the warning is suppressed and the outcome re-checked
+        // rather than trusted. A file that is already gone is the result this
+        // method wanted, not a failure, and the unguarded unlink() used to
+        // report it as one while flooding the log with
+        // "No such file or directory" under concurrency.
+        if (@\unlink($filepath) || !\is_file($filepath)) {
+            return true;
+        }
+        $this->log("Cache (files): File '{$filepath}' could not be deleted");
+        return false;
     }
 
     /**
