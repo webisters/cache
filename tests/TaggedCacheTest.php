@@ -9,6 +9,8 @@
  */
 namespace Tests\Cache;
 
+use Framework\Cache\FilesCache;
+use Framework\Cache\Serializer;
 use Framework\Cache\TaggedCache;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
@@ -213,15 +215,12 @@ final class TaggedCacheTest extends TestCase
     {
         $tagged = $this->cache->tags('posts')->setTagTtl(4);
         $tagged->set('list', 'value');
-        $before = $this->cache->get('@w:tag:posts');
-        self::assertIsArray($before);
+        $before = $this->tagToken('posts');
         \sleep(3);
         $this->cache->setCount = 0;
         $tagged->set('list', 'value');
         self::assertSame(2, $this->cache->setCount, 'the version is rewritten');
-        $after = $this->cache->get('@w:tag:posts');
-        self::assertIsArray($after);
-        self::assertSame($before['version'], $after['version']);
+        self::assertSame($before, $this->tagToken('posts'));
         self::assertSame('value', $tagged->get('list'));
     }
 
@@ -258,19 +257,14 @@ final class TaggedCacheTest extends TestCase
     {
         $tagged = $this->cache->tags('posts');
         $tagged->set('list', 'value');
-        $stored = $this->cache->get('@w:tag:posts');
-        self::assertIsArray($stored);
-        self::assertArrayHasKey('version', $stored);
-        $version = $stored['version'];
-        self::assertIsString($version);
-        // Put the tag key back into the old shape.
+        $version = $this->tagToken('posts');
+        // Put the tag key back into the old shape: a bare token, no colon.
         $this->cache->set('@w:tag:posts', $version);
         self::assertSame('value', $tagged->get('list'));
-        // The next write upgrades the envelope without changing the token.
+        // The next write stamps a renewal time on without changing the token.
         $tagged->set('list', 'again');
-        $upgraded = $this->cache->get('@w:tag:posts');
-        self::assertIsArray($upgraded);
-        self::assertSame($version, $upgraded['version']);
+        self::assertStringContainsString(':', (string) $this->cache->get('@w:tag:posts'));
+        self::assertSame($version, $this->tagToken('posts'));
         self::assertSame('again', $tagged->get('list'));
     }
 
@@ -278,7 +272,7 @@ final class TaggedCacheTest extends TestCase
     {
         $tagged = $this->cache->tags('posts');
         $tagged->set('list', 'value');
-        $this->cache->set('@w:tag:posts', ['version' => '', 'renew' => 0]);
+        $this->cache->set('@w:tag:posts', '0:');
         // An unusable version is treated as absent, so a fresh one is made and
         // the items under the old one are no longer reachable.
         self::assertNull($tagged->get('list'));
@@ -296,5 +290,51 @@ final class TaggedCacheTest extends TestCase
         self::assertSame('value', $tagged->get('list'));
         self::assertTrue($tagged->set('other', 'second'));
         self::assertSame('second', $tagged->get('other'));
+    }
+
+    /**
+     * Read the current token of a tag out of the stored value.
+     *
+     * @param string $tag
+     *
+     * @return string
+     */
+    private function tagToken(string $tag) : string
+    {
+        $stored = (string) $this->cache->get('@w:tag:' . $tag);
+        $parts = \explode(':', $stored, 2);
+        return \count($parts) === 2 ? $parts[1] : $stored;
+    }
+
+    /**
+     * The renewal timestamp travels with the token in one string because the
+     * value passes through the configured serializer, and Serializer::JSON
+     * decodes a map to stdClass rather than to an array. An array here would
+     * be unreadable on every serializing driver configured that way, so the
+     * version would be reminted on every read and tags would never match.
+     *
+     * @return void
+     */
+    public function testTheStoredVersionSurvivesEverySerializer() : void
+    {
+        $directory = \sys_get_temp_dir() . '/webisters-tagver-' . \getmypid();
+        // FilesCache requires the directory to exist already, see issue #52.
+        if (!\is_dir($directory)) {
+            \mkdir($directory, 0700, true);
+        }
+        foreach ([Serializer::PHP, Serializer::JSON, Serializer::JSON_ARRAY] as $serializer) {
+            $cache = new FilesCache(['directory' => $directory], null, $serializer);
+            $tagged = $cache->tags('posts');
+            self::assertTrue($tagged->set('list', 'value'), $serializer->value);
+            self::assertSame('value', $tagged->get('list'), $serializer->value);
+            // The window must hold, which it cannot if the value came back in
+            // a shape readTagVersion() does not recognise.
+            $cache->flush();
+            $tagged->set('list', 'value');
+            $tagged->set('other', 'second');
+            self::assertSame('value', $tagged->get('list'), $serializer->value);
+            self::assertSame('second', $tagged->get('other'), $serializer->value);
+            $cache->flush();
+        }
     }
 }

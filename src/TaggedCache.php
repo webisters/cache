@@ -435,11 +435,17 @@ class TaggedCache
     /**
      * Read a stored tag version and the time it is next due for renewal.
      *
-     * Accepts the plain version string written by releases before the renewal
-     * window existed. Such a value is kept as it stands rather than replaced,
-     * because a new token would invalidate every item already carrying the old
-     * one. It reports a renewal time of zero, so the next write upgrades it to
-     * the current shape.
+     * The two are kept in one string as "<renewal timestamp>:<token>" rather
+     * than in an array, because the value passes through the configured
+     * serializer and Serializer::JSON decodes a map to stdClass rather than to
+     * an array. A string survives every serializer unchanged. Tokens come from
+     * bin2hex() so they never contain a colon.
+     *
+     * Accepts the bare token written by releases before the renewal window
+     * existed, which is recognisable by having no colon. Such a value is kept
+     * as it stands rather than replaced, because a new token would invalidate
+     * every item already carrying the old one. It reports a renewal time of
+     * zero, so the next write upgrades it to the current shape.
      *
      * @since 4.4
      *
@@ -451,18 +457,15 @@ class TaggedCache
     protected function readTagVersion(string $tagKey) : array
     {
         $stored = $this->cache->get($tagKey);
-        if (\is_array($stored)
-            && isset($stored['version'], $stored['renew'])
-            && \is_string($stored['version'])
-            && $stored['version'] !== ''
-            && \is_int($stored['renew'])
-        ) {
-            return [$stored['version'], $stored['renew']];
+        if (!\is_string($stored) || $stored === '') {
+            return ['', 0];
         }
-        if (\is_string($stored) && $stored !== '') {
-            return [$stored, 0];
+        $parts = \explode(':', $stored, 2);
+        if (\count($parts) === 2 && \ctype_digit($parts[0]) && $parts[1] !== '') {
+            return [$parts[1], (int) $parts[0]];
         }
-        return ['', 0];
+        // A bare token, written by a release before the renewal window.
+        return [$stored, 0];
     }
 
     /**
@@ -479,10 +482,7 @@ class TaggedCache
     {
         return $this->cache->set(
             $tagKey,
-            [
-                'version' => $version,
-                'renew' => \time() + $this->getRenewAfter(),
-            ],
+            (\time() + $this->getRenewAfter()) . ':' . $version,
             $this->getTagTtl()
         );
     }
