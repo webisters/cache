@@ -9,6 +9,8 @@
  */
 namespace Tests\Cache;
 
+use Framework\Cache\FilesCache;
+use Framework\Cache\Serializer;
 use Framework\Cache\TaggedCache;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
@@ -182,5 +184,157 @@ final class TaggedCacheTest extends TestCase
     {
         self::assertInstanceOf(TaggedCache::class, $this->cache->tags('posts'));
         self::assertSame(['posts', 'users'], $this->cache->tags(['users', 'posts'])->getTags());
+    }
+
+    public function testARepeatedTaggedWriteCostsNoMoreThanAnUntaggedOne() : void
+    {
+        $tagged = $this->cache->tags(['a', 'b', 'c']);
+        // First write creates the three tag versions alongside the item.
+        $this->cache->setCount = 0;
+        $tagged->set('key', 'value');
+        self::assertSame(4, $this->cache->setCount);
+        // Later writes reuse them. Before the renewal window every write
+        // rewrote all three versions, costing 4 writes every time.
+        $this->cache->setCount = 0;
+        $tagged->set('key', 'value');
+        self::assertSame(1, $this->cache->setCount);
+        $this->cache->setCount = 0;
+        for ($i = 0; $i < 10; $i++) {
+            $tagged->set('key' . $i, $i);
+        }
+        self::assertSame(10, $this->cache->setCount);
+    }
+
+    /**
+     * A tag TTL of 4 gives a renewal window of 2, so sleeping 3 lands past the
+     * window but before the version would expire. That is renewal rather than
+     * a lapse, and the difference is the token: a renewed version keeps it, a
+     * lapsed one gets a new one and takes its items with it.
+     */
+    public function testTagVersionIsRenewedWithoutChangingTheToken() : void
+    {
+        $tagged = $this->cache->tags('posts')->setTagTtl(4);
+        $tagged->set('list', 'value');
+        $before = $this->tagToken('posts');
+        \sleep(3);
+        $this->cache->setCount = 0;
+        $tagged->set('list', 'value');
+        self::assertSame(2, $this->cache->setCount, 'the version is rewritten');
+        self::assertSame($before, $this->tagToken('posts'));
+        self::assertSame('value', $tagged->get('list'));
+    }
+
+    public function testRenewalKeepsItemsReachableBeyondTheOriginalTagTtl() : void
+    {
+        $tagged = $this->cache->tags('posts')->setTagTtl(4);
+        $tagged->set('list', 'value');
+        \sleep(3);
+        // Renews the version, pushing its expiry out from 4 seconds to 7.
+        $tagged->set('other', 'second');
+        \sleep(3);
+        // Six seconds in. Without the renewal the version would have expired
+        // at four and a new token would have orphaned both items.
+        self::assertSame('value', $tagged->get('list'));
+        self::assertSame('second', $tagged->get('other'));
+    }
+
+    public function testFlushStillInvalidatesAfterARenewal() : void
+    {
+        $tagged = $this->cache->tags('posts')->setTagTtl(4);
+        $tagged->set('list', 'value');
+        \sleep(3);
+        $tagged->set('list', 'value');
+        self::assertTrue($tagged->flush());
+        self::assertNull($tagged->get('list'));
+    }
+
+    /**
+     * A version written by a release before the renewal window is a plain
+     * string. It must be kept rather than replaced, or every item already
+     * carrying it would be invalidated by the upgrade alone.
+     */
+    public function testAPlainStringVersionFromAnOlderReleaseIsKept() : void
+    {
+        $tagged = $this->cache->tags('posts');
+        $tagged->set('list', 'value');
+        $version = $this->tagToken('posts');
+        // Put the tag key back into the old shape: a bare token, no colon.
+        $this->cache->set('@w:tag:posts', $version);
+        self::assertSame('value', $tagged->get('list'));
+        // The next write stamps a renewal time on without changing the token.
+        $tagged->set('list', 'again');
+        self::assertStringContainsString(':', (string) $this->cache->get('@w:tag:posts'));
+        self::assertSame($version, $this->tagToken('posts'));
+        self::assertSame('again', $tagged->get('list'));
+    }
+
+    public function testAGarbageTagVersionIsReplacedRatherThanTrusted() : void
+    {
+        $tagged = $this->cache->tags('posts');
+        $tagged->set('list', 'value');
+        $this->cache->set('@w:tag:posts', '0:');
+        // An unusable version is treated as absent, so a fresh one is made and
+        // the items under the old one are no longer reachable.
+        self::assertNull($tagged->get('list'));
+        self::assertTrue($tagged->set('list', 'new'));
+        self::assertSame('new', $tagged->get('list'));
+    }
+
+    public function testASmallestTagTtlKeepsItemsReachable() : void
+    {
+        // intdiv(1, 2) is 0, which as a renewal window would mean "renew
+        // always". The floor of 1 keeps a real window, and either way a write
+        // must never orphan the items it just grouped.
+        $tagged = $this->cache->tags('posts')->setTagTtl(1);
+        self::assertTrue($tagged->set('list', 'value'));
+        self::assertSame('value', $tagged->get('list'));
+        self::assertTrue($tagged->set('other', 'second'));
+        self::assertSame('second', $tagged->get('other'));
+    }
+
+    /**
+     * Read the current token of a tag out of the stored value.
+     *
+     * @param string $tag
+     *
+     * @return string
+     */
+    private function tagToken(string $tag) : string
+    {
+        $stored = (string) $this->cache->get('@w:tag:' . $tag);
+        $parts = \explode(':', $stored, 2);
+        return \count($parts) === 2 ? $parts[1] : $stored;
+    }
+
+    /**
+     * The renewal timestamp travels with the token in one string because the
+     * value passes through the configured serializer, and Serializer::JSON
+     * decodes a map to stdClass rather than to an array. An array here would
+     * be unreadable on every serializing driver configured that way, so the
+     * version would be reminted on every read and tags would never match.
+     *
+     * @return void
+     */
+    public function testTheStoredVersionSurvivesEverySerializer() : void
+    {
+        $directory = \sys_get_temp_dir() . '/webisters-tagver-' . \getmypid();
+        // FilesCache requires the directory to exist already, see issue #52.
+        if (!\is_dir($directory)) {
+            \mkdir($directory, 0700, true);
+        }
+        foreach ([Serializer::PHP, Serializer::JSON, Serializer::JSON_ARRAY] as $serializer) {
+            $cache = new FilesCache(['directory' => $directory], null, $serializer);
+            $tagged = $cache->tags('posts');
+            self::assertTrue($tagged->set('list', 'value'), $serializer->value);
+            self::assertSame('value', $tagged->get('list'), $serializer->value);
+            // The window must hold, which it cannot if the value came back in
+            // a shape readTagVersion() does not recognise.
+            $cache->flush();
+            $tagged->set('list', 'value');
+            $tagged->set('other', 'second');
+            self::assertSame('value', $tagged->get('list'), $serializer->value);
+            self::assertSame('second', $tagged->get('other'), $serializer->value);
+            $cache->flush();
+        }
     }
 }
