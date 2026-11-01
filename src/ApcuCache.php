@@ -23,7 +23,7 @@ class ApcuCache extends Cache
 {
     protected function initialize() : void
     {
-        if (!apcu_enabled()) {
+        if (!\apcu_enabled()) {
             throw new RuntimeException('APCu extension is not enabled');
         }
     }
@@ -43,7 +43,7 @@ class ApcuCache extends Cache
 
     protected function getValue(string $key) : mixed
     {
-        $key = apcu_fetch($this->renderKey($key), $success);
+        $key = \apcu_fetch($this->renderKey($key), $success);
         return $success
             ? $this->unserialize($key)
             : null;
@@ -64,14 +64,14 @@ class ApcuCache extends Cache
                 $ttl,
                 $start,
                 $value,
-                apcu_store(
+                \apcu_store(
                     $this->renderKey($key),
                     $this->serialize($value),
                     $this->makeTtl($ttl)
                 )
             );
         }
-        return apcu_store(
+        return \apcu_store(
             $this->renderKey($key),
             $this->serialize($value),
             $this->makeTtl($ttl)
@@ -92,14 +92,14 @@ class ApcuCache extends Cache
                 $ttl,
                 $start,
                 $value,
-                apcu_add(
+                \apcu_add(
                     $this->renderKey($key),
                     $this->serialize($value),
                     $this->makeTtl($ttl)
                 )
             );
         }
-        return apcu_add(
+        return \apcu_add(
             $this->renderKey($key),
             $this->serialize($value),
             $this->makeTtl($ttl)
@@ -113,10 +113,10 @@ class ApcuCache extends Cache
             return $this->addDebugDelete(
                 $key,
                 $start,
-                apcu_delete($this->renderKey($key))
+                \apcu_delete($this->renderKey($key))
             );
         }
-        return apcu_delete($this->renderKey($key));
+        return \apcu_delete($this->renderKey($key));
     }
 
     /**
@@ -150,9 +150,9 @@ class ApcuCache extends Cache
     protected function flushValues() : bool
     {
         if (!$this->hasPrefix()) {
-            return apcu_clear_cache();
+            return \apcu_clear_cache();
         }
-        return apcu_delete(
+        return \apcu_delete(
             new APCuIterator('/^' . \preg_quote((string) $this->prefix, '/') . '/')
         ) !== false;
     }
@@ -172,8 +172,8 @@ class ApcuCache extends Cache
     {
         if (isset($this->debugCollector)) {
             $start = \microtime(true);
-            return $this->addDebugFlush($start, apcu_clear_cache());
+            return $this->addDebugFlush($start, \apcu_clear_cache());
         }
-        return apcu_clear_cache();
+        return \apcu_clear_cache();
     }
 }

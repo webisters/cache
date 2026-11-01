@@ -1113,7 +1113,7 @@ abstract class Cache
     protected function serialize(mixed $value) : string
     {
         if ($this->serializer === Serializer::IGBINARY) {
-            return $this->assertSerialized(igbinary_serialize($value));
+            return $this->assertSerialized(\igbinary_serialize($value));
         }
         if ($this->serializer === Serializer::JSON
             || $this->serializer === Serializer::JSON_ARRAY
@@ -1121,7 +1121,7 @@ abstract class Cache
             return \json_encode($value, \JSON_THROW_ON_ERROR);
         }
         if ($this->serializer === Serializer::MSGPACK) {
-            return $this->assertSerialized(msgpack_serialize($value));
+            return $this->assertSerialized(\msgpack_serialize($value));
         }
         return \serialize($value);
     }
@@ -1159,7 +1159,7 @@ abstract class Cache
     protected function unserialize(string $value) : mixed
     {
         if ($this->serializer === Serializer::IGBINARY) {
-            return @igbinary_unserialize($value);
+            return @\igbinary_unserialize($value);
         }
         if ($this->serializer === Serializer::JSON) {
             return \json_decode($value);
@@ -1168,7 +1168,7 @@ abstract class Cache
             return \json_decode($value, true);
         }
         if ($this->serializer === Serializer::MSGPACK) {
-            return msgpack_unserialize($value);
+            return \msgpack_unserialize($value);
         }
         return \unserialize($value, ['allowed_classes' => true]);
     }

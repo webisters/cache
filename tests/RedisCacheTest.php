@@ -9,8 +9,8 @@
  */
 namespace Tests\Cache;
 
-use Framework\Cache\ConnectionException;
 use Framework\Cache\Cache;
+use Framework\Cache\ConnectionException;
 use Framework\Cache\RedisCache;
 
 class RedisCacheTest extends TestCase
