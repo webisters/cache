@@ -124,6 +124,61 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         self::assertNull($this->cache->get('foo'));
     }
 
+    public function testMultiMethodsOnAnEmptyList() : void
+    {
+        self::assertSame([], $this->cache->getMulti([]));
+        self::assertSame([], $this->cache->setMulti([], static::LIVE_TTL));
+        self::assertSame([], $this->cache->deleteMulti([]));
+    }
+
+    public function testGetMultiWithARepeatedKey() : void
+    {
+        self::assertTrue($this->cache->set('foo', 'x', static::LIVE_TTL));
+        self::assertSame(
+            ['foo' => 'x', 'bar' => null],
+            $this->cache->getMulti(['foo', 'bar', 'foo'])
+        );
+    }
+
+    public function testDeleteMultiWithARepeatedKey() : void
+    {
+        self::assertTrue($this->cache->set('foo', 'x', static::LIVE_TTL));
+        $status = $this->cache->deleteMulti(['foo', 'foo']);
+        self::assertArrayHasKey('foo', $status);
+        self::assertNull($this->cache->get('foo'));
+    }
+
+    public function testSetMultiWithAnAlreadyExpiredTtlStoresNothing() : void
+    {
+        self::assertTrue($this->cache->set('foo', 'kept', static::LIVE_TTL));
+        self::assertSame(
+            ['foo' => true, 'bar' => true],
+            $this->cache->setMulti(['foo' => 'x', 'bar' => 'y'], 0)
+        );
+        // A TTL of zero or less describes an item expired on arrival, so the
+        // names are cleared rather than written.
+        self::assertSame(
+            ['foo' => null, 'bar' => null],
+            $this->cache->getMulti(['foo', 'bar'])
+        );
+    }
+
+    public function testMultiMethodsRoundTripFalsyValues() : void
+    {
+        $data = [
+            'false' => false,
+            'zero' => 0,
+            'zeroString' => '0',
+            'emptyString' => '',
+            'emptyArray' => [],
+        ];
+        self::assertSame(
+            \array_fill_keys(\array_keys($data), true),
+            $this->cache->setMulti($data, static::LIVE_TTL)
+        );
+        self::assertSame($data, $this->cache->getMulti(\array_keys($data)));
+    }
+
     public function testDeleteMulti() : void
     {
         self::assertSame(

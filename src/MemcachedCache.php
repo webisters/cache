@@ -175,6 +175,148 @@ class MemcachedCache extends Cache
             : $key;
     }
 
+    /**
+     * Gets multi items from the cache storage.
+     *
+     * One Memcached::getMulti() rather than one get per key.
+     *
+     * @since 4.4
+     *
+     * @param array<int,string> $keys List of items names to get
+     *
+     * @return array<string,mixed> Associative array with the items names as
+     * keys and their values, null for the ones that were not found
+     */
+    public function getMulti(array $keys) : array
+    {
+        $values = \array_fill_keys($keys, null);
+        if (!$keys) {
+            return $values;
+        }
+        if (isset($this->debugCollector)) {
+            $start = \microtime(true);
+            $found = $this->getValues($keys);
+            foreach ($keys as $key) {
+                $this->addDebugGet($key, $start, $found[$key] ?? null);
+            }
+            return \array_replace($values, $found);
+        }
+        return \array_replace($values, $this->getValues($keys));
+    }
+
+    /**
+     * Read the items found among the given names, in one round trip.
+     *
+     * @since 4.4
+     *
+     * @param array<int,string> $keys List of items names to get
+     *
+     * @return array<string,mixed> Only the names that were found, with their
+     * values
+     */
+    protected function getValues(array $keys) : array
+    {
+        $keys = \array_values(\array_unique($keys));
+        $rendered = [];
+        foreach ($keys as $key) {
+            // A rendered key can repeat where two names digest to the same
+            // thing, and getMulti() answers once per distinct key.
+            $rendered[$this->renderKey($key)][] = $key;
+        }
+        $found = $this->memcached->getMulti(\array_keys($rendered));
+        if (!\is_array($found)) {
+            return [];
+        }
+        $values = [];
+        foreach ($found as $renderedKey => $value) {
+            foreach ($rendered[$renderedKey] ?? [] as $key) {
+                $values[$key] = $value;
+            }
+        }
+        return $values;
+    }
+
+    /**
+     * Sets multi items to the cache storage.
+     *
+     * One Memcached::setMulti() rather than one set per key. That call answers
+     * with a single boolean for the whole batch, so a failure is reported
+     * against every key in it.
+     *
+     * @since 4.4
+     *
+     * @param array<string,mixed> $data Associative array with key names and
+     * respective values
+     * @param int|null $ttl The Time To Live for all the items or null to use
+     * the default
+     *
+     * @return array<string,bool> Associative array with key names and
+     * respective set status
+     */
+    public function setMulti(array $data, ?int $ttl = null) : array
+    {
+        if (!$data) {
+            return [];
+        }
+        if ($this->isExpiredTtl($ttl)) {
+            // Already expired, so there is nothing worth storing, and any item
+            // under those names is now stale.
+            $this->deleteMulti(\array_keys($data));
+            return \array_fill_keys(\array_keys($data), true);
+        }
+        $start = isset($this->debugCollector) ? \microtime(true) : 0.0;
+        $rendered = [];
+        foreach ($data as $key => $value) {
+            $rendered[$this->renderKey((string) $key)] = $value;
+        }
+        $set = $this->memcached->setMulti($rendered, $this->makeTtl($ttl));
+        $status = \array_fill_keys(\array_keys($data), $set);
+        if (isset($this->debugCollector)) {
+            foreach ($data as $key => $value) {
+                $this->addDebugSet((string) $key, $ttl, $start, $value, $set);
+            }
+        }
+        return $status;
+    }
+
+    /**
+     * Deletes multi items from the cache storage.
+     *
+     * One Memcached::deleteMulti() rather than one delete per key.
+     *
+     * @since 4.4
+     *
+     * @param array<int,string> $keys List of items names to delete
+     *
+     * @return array<string,bool> Associative array with the items names as
+     * keys and their delete status
+     */
+    public function deleteMulti(array $keys) : array
+    {
+        if (!$keys) {
+            return [];
+        }
+        $start = isset($this->debugCollector) ? \microtime(true) : 0.0;
+        $rendered = [];
+        foreach ($keys as $key) {
+            $rendered[$this->renderKey($key)][] = $key;
+        }
+        $results = $this->memcached->deleteMulti(\array_keys($rendered));
+        $status = [];
+        foreach ($rendered as $renderedKey => $names) {
+            // deleteMulti() reports true per key, or the result code of the
+            // failure, so anything other than true is a failure to delete.
+            $result = \is_array($results) ? ($results[$renderedKey] ?? false) : false;
+            foreach ($names as $key) {
+                $status[$key] = $result === true;
+                if (isset($this->debugCollector)) {
+                    $this->addDebugDelete($key, $start, $status[$key]);
+                }
+            }
+        }
+        return $status;
+    }
+
     public function set(string $key, mixed $value, ?int $ttl = null) : bool
     {
         if ($this->isExpiredTtl($ttl)) {

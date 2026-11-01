@@ -178,6 +178,155 @@ class RedisCache extends Cache
         return $this->unserialize($value);
     }
 
+    /**
+     * Gets multi items from the cache storage.
+     *
+     * One MGET rather than one GET per key.
+     *
+     * @since 4.4
+     *
+     * @param array<int,string> $keys List of items names to get
+     *
+     * @return array<string,mixed> Associative array with the items names as
+     * keys and their values, null for the ones that were not found
+     */
+    public function getMulti(array $keys) : array
+    {
+        $values = \array_fill_keys($keys, null);
+        if (!$keys) {
+            return $values;
+        }
+        if (isset($this->debugCollector)) {
+            $start = \microtime(true);
+            $found = $this->getValues($keys);
+            foreach ($keys as $key) {
+                $this->addDebugGet($key, $start, $found[$key] ?? null);
+            }
+            return \array_replace($values, $found);
+        }
+        return \array_replace($values, $this->getValues($keys));
+    }
+
+    /**
+     * Read the items found among the given names, in one round trip.
+     *
+     * @since 4.4
+     *
+     * @param array<int,string> $keys List of items names to get
+     *
+     * @return array<string,mixed> Only the names that were found, with their
+     * values
+     */
+    protected function getValues(array $keys) : array
+    {
+        $keys = \array_values(\array_unique($keys));
+        $rendered = [];
+        foreach ($keys as $key) {
+            $rendered[] = $this->renderKey($key);
+        }
+        $raw = $this->redis->mGet($rendered);
+        if (!\is_array($raw)) {
+            return [];
+        }
+        $values = [];
+        foreach ($keys as $index => $key) {
+            $value = $raw[$index] ?? false;
+            // A stored item is always a serialized string, so false is the
+            // missing-key answer and never a value. The null coalescing above
+            // already folds a null answer into false.
+            if ($value === false) {
+                continue;
+            }
+            $values[$key] = $this->unserialize((string) $value);
+        }
+        return $values;
+    }
+
+    /**
+     * Sets multi items to the cache storage.
+     *
+     * One pipeline rather than one SET per key. MSET is not usable here
+     * because it cannot carry a per-item TTL.
+     *
+     * @since 4.4
+     *
+     * @param array<string,mixed> $data Associative array with key names and
+     * respective values
+     * @param int|null $ttl The Time To Live for all the items or null to use
+     * the default
+     *
+     * @return array<string,bool> Associative array with key names and
+     * respective set status
+     */
+    public function setMulti(array $data, ?int $ttl = null) : array
+    {
+        if (!$data) {
+            return [];
+        }
+        if ($this->isExpiredTtl($ttl)) {
+            // Already expired, so there is nothing worth storing, and any item
+            // under those names is now stale.
+            $this->deleteMulti(\array_keys($data));
+            return \array_fill_keys(\array_keys($data), true);
+        }
+        $start = isset($this->debugCollector) ? \microtime(true) : 0.0;
+        $options = ['ex' => $this->makeTtl($ttl)];
+        $pipeline = $this->redis->multi(Redis::PIPELINE);
+        foreach ($data as $key => $value) {
+            $pipeline->set($this->renderKey((string) $key), $this->serialize($value), $options);
+        }
+        $results = $pipeline->exec();
+        $status = [];
+        $index = 0;
+        foreach ($data as $key => $value) {
+            $result = \is_array($results) ? ($results[$index] ?? false) : false;
+            $status[$key] = (bool) $result;
+            if (isset($this->debugCollector)) {
+                $this->addDebugSet((string) $key, $ttl, $start, $value, $status[$key]);
+            }
+            $index++;
+        }
+        return $status;
+    }
+
+    /**
+     * Deletes multi items from the cache storage.
+     *
+     * One pipeline rather than one DEL per key. A single DEL taking every key
+     * would be one command, but it answers with a total rather than a result
+     * per key, and this method reports per key.
+     *
+     * @since 4.4
+     *
+     * @param array<int,string> $keys List of items names to delete
+     *
+     * @return array<string,bool> Associative array with the items names as
+     * keys and their delete status
+     */
+    public function deleteMulti(array $keys) : array
+    {
+        if (!$keys) {
+            return [];
+        }
+        $start = isset($this->debugCollector) ? \microtime(true) : 0.0;
+        $pipeline = $this->redis->multi(Redis::PIPELINE);
+        foreach ($keys as $key) {
+            $pipeline->del($this->renderKey($key));
+        }
+        $results = $pipeline->exec();
+        $status = [];
+        $index = 0;
+        foreach ($keys as $key) {
+            $result = \is_array($results) ? ($results[$index] ?? false) : false;
+            $status[$key] = (bool) $result;
+            if (isset($this->debugCollector)) {
+                $this->addDebugDelete($key, $start, $status[$key]);
+            }
+            $index++;
+        }
+        return $status;
+    }
+
     public function set(string $key, mixed $value, ?int $ttl = null) : bool
     {
         if ($this->isExpiredTtl($ttl)) {
